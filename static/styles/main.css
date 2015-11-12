@@ -11,6 +11,18 @@ iframe {
   margin:12px;
 }
 
+#peers {
+  float: right;
+  padding: 12px 24px 12px 42px;
+  background: transparent url('/img/network.svg') no-repeat scroll left center / 32px auto;
+}
+
+#peers .number {
+  color: rgb(85, 72, 126);
+  font-size: 18px;
+  font-weight: bold;
+}
+
 #header h1 {
   color: #fff;
   max-width: 405px;

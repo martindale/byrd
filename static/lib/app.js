@@ -15,6 +15,21 @@ document.addEventListener('DOMContentLoaded', function() {
   var search = document.getElementById('byrd-search');
   var searchInput = document.getElementById('unshred-blueprint-name');
   var suggestions = document.getElementsByClassName('suggestion');
+  var peerIndicator = document.getElementById('peers');
+
+  updatePeerList();
+  setInterval(updatePeerList, 3000);
+
+  function updatePeerList() {
+    var peers = byrd.peerlist();
+    var number = peerIndicator.getElementsByClassName('number')[0];
+
+    number.innerHTML = peers.length;
+    peerIndicator.setAttribute(
+      'title',
+      'Connected to ' + peers.length + ' peers:\n\n' + peers.join('\n')
+    );
+  }
 
   // toggles between file dropzone and file naming form
   function toggleDropzoneNaming() {
