@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var search = document.getElementById('byrd-search');
   var searchInput = document.getElementById('unshred-blueprint-name');
   var suggestions = document.getElementsByClassName('suggestion');
-
+  
   // toggles between file dropzone and file naming form
   function toggleDropzoneNaming() {
     if (!dropzone.getAttribute('style')) {
@@ -128,9 +128,8 @@ document.addEventListener('DOMContentLoaded', function() {
         chunksStarted++;
         var hash = sha256(new Buffer(chunk, 'base64')).toString('base64');
 
-        statusline.setStatus('working', 'Distributing chunk ' + chunksStarted +
-                             ' of ' + chunks.length + '. ' + chunksDistributed +
-                             ' completed.');
+        statusline.setStatus('working', 'Distributed ' + chunksDistributed +
+                             ' of ' + chunks.length + '.';
 
         byrd.dht.put(hash, chunk, function(err) {
           chunksDistributed++;
