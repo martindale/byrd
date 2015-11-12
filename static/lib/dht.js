@@ -1,6 +1,9 @@
 'use strict';
 
-var kademlia = window.kad
+var kademlia = window.kad;
+var address = location.hostname;
+var port = Number(location.port) || (protocol === 'https' ? 443 : 80);
+var protocol = location.protocol.substr(0, location.protocol.length - 1);
 
 window.byrd.dht = kademlia({
   transport: byrd.ByrdClientTransport,
@@ -10,9 +13,9 @@ window.byrd.dht = kademlia({
   storage: new KadLocalStorage('byrd'),
   seeds: [
     {
-      address: location.hostname,
-      port: Number(location.port),
-      protocol: location.protocol.substr(0, location.protocol.length - 1)
+      address: address,
+      port: port,
+      protocol: protocol
     }
   ],
   logLevel: 4
