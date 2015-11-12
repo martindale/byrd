@@ -129,7 +129,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var hash = sha256(new Buffer(chunk, 'base64')).toString('base64');
 
         statusline.setStatus('working', 'Distributed ' + chunksDistributed +
-                             ' of ' + chunks.length + '.');
+                             ' of ' + chunks.length + ' chunks.');
 
         byrd.dht.put(hash, chunk, function(err) {
           chunksDistributed++;
