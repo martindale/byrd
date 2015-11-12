@@ -9,10 +9,6 @@ window.byrd.Shredder = (function() {
   var MIN_CHUNKS = 10;
   var MAX_CHUNK_SIZE = 32 * 1000;
 
-  var bitcore = require('bitcore-lib');
-  var sha256 = bitcore.crypto.Hash.sha256;
-  var Buffer = bitcore.deps.Buffer;
-
   function Shredder(file) {
     this._reader = new FileReader();
     this._file = file;
@@ -105,9 +101,6 @@ window.byrd.Shredder = (function() {
     for (var i = 0; i < chunks.length; i++) {
       encryptedFileString += chunks[i];
     }
-
-    console.log(fileHash)
-    console.log(encryptedFileString)
 
     var decryptedFileString = Aes.Ctr.decrypt(encryptedFileString, fileHash, 256);
 

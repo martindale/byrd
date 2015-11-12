@@ -7,7 +7,7 @@ module.exports = {
   cert: null, // string path to certificate
   key: null, // string path to key
   seeds: [
-    { address: 'byrd.io', port: 443, protocol: 'https' }
+    // { address: 'byrd.io', port: 443, protocol: 'https' }
   ],
   address: '127.0.0.1',
   port: 8080,

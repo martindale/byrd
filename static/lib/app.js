@@ -1,9 +1,6 @@
 'use strict';
 
-var bitcore = require('bitcore-lib');
-var Buffer = bitcore.deps.Buffer;
-var sha256 = bitcore.crypto.Hash.sha256;
-var api = new byrd.APIClient();
+byrd.queuedFiles = null;
 
 document.addEventListener('DOMContentLoaded', function() {
 
@@ -49,6 +46,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // when we get a new file, show the naming form
   fileInput.addEventListener('change', function(e) {
     toggleDropzoneNaming();
+    byrd.queuedFiles = this.files;
     e.preventDefault();
   });
 
@@ -63,9 +61,10 @@ document.addEventListener('DOMContentLoaded', function() {
     var files = e.dataTransfer.files;
     var input = document.getElementById('file');
 
-    input.files = files;
-
+    byrd.queuedFiles = files;
+    toggleDropzoneNaming();
     e.preventDefault();
+    this.removeAttribute('class');
     return false;
   });
 
@@ -110,7 +109,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var chunksStarted = 0;
     var chunksDistributed = 0;
     var input = document.getElementById('file');
-    var file = input.files[0];
+    var file = byrd.queuedFiles[0];
     var shredder = new byrd.Shredder(file);
     var blueprintName = document.getElementById('blueprint-name').value;
     var nameParts = shredder._file.name.split('.');
@@ -133,7 +132,7 @@ document.addEventListener('DOMContentLoaded', function() {
                              ' of ' + chunks.length + '. ' + chunksDistributed +
                              ' completed.');
 
-        api.put(hash, chunk, function(err, result) {
+        byrd.dht.put(hash, chunk, function(err) {
           chunksDistributed++;
           done(err, hash);
         });
@@ -152,27 +151,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
       statusline.setStatus('working', 'Distributing file blueprint...');
 
-      api.put(blueprintHash, JSON.stringify(blueprint), storeAliasName);
-    }
+      byrd.dht.put(blueprintHash, JSON.stringify(blueprint), storeAliasName);
 
-    // store alias to file blueprint
-    function storeAliasName(err, result) {
-      if (err) {
-        chomper.stop()();
-        return statusline.setStatus('failed', 'Failed to distribute file blueprint!');
-      }
-
-      statusline.setStatus('working', 'Registering alias name for file blueprint...');
-
-      api.put(blueprintName, blueprintHash, function(err){
-        chomper.stop();
-
+      // store alias to file blueprint
+      function storeAliasName(err, result) {
         if (err) {
-          return statusline.setStatus('failed', 'Failed to register alias name for file blueprint!');
+          chomper.stop()();
+          return statusline.setStatus('failed', 'Failed to distribute file blueprint!');
         }
 
-        statusline.setStatus('success', 'File encrypted, shredded, and distributed. Share your alias name!');
-      });
+        statusline.setStatus('working', 'Registering alias name for file blueprint...');
+
+        byrd.dht.put(blueprintName, blueprintHash, function(err){
+          chomper.stop();
+
+          if (err) {
+            return statusline.setStatus('failed', 'Failed to register alias name for file blueprint!');
+          }
+
+          statusline.setStatus('success', 'File encrypted, shredded, and distributed. Share your alias name!');
+        });
+      }
     }
   });
 
@@ -188,22 +187,20 @@ document.addEventListener('DOMContentLoaded', function() {
     container.innerHTML = '';
 
     statusline.setStatus('working', 'Querying network for file blueprint...');
-    api.get(blueprintName, lookupBlueprintHash);
+    byrd.dht.get(blueprintName, lookupBlueprintHash);
 
     // query network for the blueprint hash associated with a given name
-    function lookupBlueprintHash(err, result) {
+    function lookupBlueprintHash(err, blueprintHash) {
       if (err) {
         return statusline.setStatus('failed', 'Failed to lookup blueprint location!');
       }
 
-      if (!result || !result.data) {
+      if (!blueprintHash) {
         return statusline.setStatus('failed', 'Could not find data for: ' + blueprintName);
       }
 
-      var blueprintHash = result.data;
-
       statusline.setStatus('working', 'Querying peers for file blueprint...');
-      api.get(blueprintHash, lookupBlueprint);
+      byrd.dht.get(blueprintHash, lookupBlueprint);
     }
 
     // using the blueprint hash, lookup the file blueprint
@@ -213,14 +210,14 @@ document.addEventListener('DOMContentLoaded', function() {
       }
 
       var numChunksReceived = 0;
-      var blueprint = JSON.parse(result.data);
+      var blueprint = JSON.parse(result);
       var shredder = new byrd.Shredder();
 
       statusline.setStatus('working', 'Got file blueprint, querying peers for chunks...');
       async.mapLimit(blueprint.chunkHashes, 15, fetchFileChunkByHash, assembleFileChunks);
 
       function fetchFileChunkByHash(hash, done) {
-        api.get(hash, function(err, result){
+        byrd.dht.get(hash, function(err, result){
           numChunksReceived++;
           statusline.setStatus('working', 'Recieved file chunk ' +
                                numChunksReceived + ' of ' +
@@ -229,14 +226,10 @@ document.addEventListener('DOMContentLoaded', function() {
         });
       }
 
-      function assembleFileChunks(err, results) {
+      function assembleFileChunks(err, chunks) {
         if (err) {
           return statusline.setStatus('failed', 'Failed to resolve all file chunks!');
         }
-
-        var chunks = results.map(function(result) {
-          return result.data;
-        });
 
         statusline.setStatus('working', 'Assembling file chunks and decrypting...');
         shredder.unshred(blueprint.fileHash, chunks, presentDownloadButtom);
