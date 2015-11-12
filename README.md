@@ -12,7 +12,7 @@ Byrd's interface also allows you reassemble the files when provided the alias of
 Getting the code:
 
 ```
-git clone https://gitlab.com/counterpoint/byrd.git && cd counterpoint
+git clone https://gitlab.com/counterpoint/byrd.git && cd byrd
 ```
 
 Installing the dependencies:
