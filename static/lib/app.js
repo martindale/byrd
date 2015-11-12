@@ -142,7 +142,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function storeBlueprint(err, chunkHashes) {
       if (err) {
         chomper.stop();
-        return statusline.setStatus('failed', 'Failed to distribute all chunks.');
+        return statusline.setStatus('failed', 'Failed to distribute all chunks. Wait for more peers.');
       }
 
       var blueprint = new byrd.Blueprint(chunkHashes, shredder.getMetadata(), shredder.getHash(), ext);
