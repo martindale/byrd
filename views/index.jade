@@ -1,0 +1,76 @@
+doctype html
+html(lang='en-us')
+  head
+    meta(charset='utf-8')
+    title BYRD ~ Bring Your Restricted Documents
+    script window.byrd = {};
+    script(src='vendor/async/dist/async.js')
+    script(src='vendor/bitcore-lib/bitcore-lib.js')
+    script(src='vendor/aes/aes.js')
+    script(src='vendor/aes/aes-ctr.js')
+    script(src='lib/statusline.js')
+    script(src='lib/shredder.js')
+    script(src='lib/blueprint.js')
+    script(src='lib/api-client.js')
+    script(src='lib/chomper.js')
+    script(src='lib/app.js')
+    link(rel='stylesheet', href='styles/main.css')
+    link(href='https://fonts.googleapis.com/css?family=Open+Sans:400,300italic,400italic,600,600italic,700,300' rel='stylesheet' type='text/css')
+    meta(name='viewport' content='width=device-width')
+body
+  #statusline
+    .wrapper
+      i#indicator.idle
+      span.status No activity
+  #header
+    h1#logo BYRD
+  #main.wrapper
+    .ctr
+      #byrd-search
+        form#unshred-form
+          .bird-search-input
+            input#unshred-blueprint-name(type='text', placeholder='Paste or type a file alias here...')
+            button#search-button Find
+        p
+          small
+            span Why not try
+            a.suggestion(href='#')  godzilla
+            span ,
+            a.suggestion(href='#')  bitcoin
+            span , or
+            a.suggestion(href='#')  helicopter
+            span ?
+      #downloadme
+    div
+      #byrd-shredder
+        h3 Distribute
+        form#shred-form
+          #distribute-name-fields(style='display:none')
+            input#blueprint-name(type='text', placeholder='Type an alias to make your content addressable...')
+            aside
+              button#distribute(type='submit') Distribute
+              button#goto-dropzone Go Back
+          #dropzone
+            img.dropzone(src='img/dropzone.svg')
+            span.desktop Drag your file or click here to select.
+            span.mobile Tap to select a file.
+          input#file(type='file')
+      #byrd-about
+        h3 About
+        p
+          span The game is simple. You've got access to documents and&nbsp;
+          strong we want you to leak them
+          span .
+        p
+          span BYRD is a distributed network that allows you to share and access content with&nbsp;
+          a(href='https://en.wikipedia.org/wiki/Plausible_deniability') plausible deniability
+          span.
+            . Files are encrypted, shredded, and disbursed all over the network. The chunks can be
+            later retrieved and reassembled on your computer by using an easy to remember "alias".
+        p
+          a(href='https://gitlab.com/counterpoint/byrd/blob/master/README.md') Learn More →
+  footer
+    .wrapper
+      small
+        span N&copy;! 2015 Counterpoint Hackers -&nbsp;
+        a(href='https://gitlab.com/counterpoint/byrd') Source

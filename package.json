@@ -1,8 +1,10 @@
 {
   "name": "byrd",
-  "version": "0.0.1",
-  "engine": "0.12.7",
-  "description": "",
+  "version": "0.0.2",
+  "engines": {
+    "node": "0.12.x"
+  },
+  "description": "secure, decentralized, content distribution with plausible deniability",
   "authors": [
     {
       "name": "Braydon Fuller"
@@ -11,24 +13,32 @@
       "name": "Gabe Gattis"
     },
     {
-      "name": "Gordon Hall"
+      "name": "Gordon Hall",
+      "email": "gordon@gordonwritescode.com"
     },
     {
       "name": "Ian Patton"
     }
   ],
-  "main": "./app.js",
+  "main": "./index.js",
   "dependencies": {
     "body-parser": "^1.14.1",
     "config": "^1.16.0",
-    "ejs": "^2.3.4",
     "express": "^4.13.3",
+    "jade": "^1.11.0",
+    "kad": "^0.8.1",
+    "leveldown": "^1.4.2",
+    "levelup": "^1.2.1",
+    "request": "^2.65.0",
     "winston": "^2.1.0"
   },
   "scripts": {
-    "start": "node server.js",
-    "postinstall": "node scripts/postinstall.js"
+    "start": "node scripts/start.js",
+    "simulate": "node scripts/simulate.js"
   },
-  "license": "MIT",
-  "repository": "https://github.com/nko5/counterpoint"
+  "license": "AGPL-3.0",
+  "repository": "https://gitlab.com/counterpoint/byrd.git",
+  "devDependencies": {
+    "memdown": "^1.1.0"
+  }
 }
