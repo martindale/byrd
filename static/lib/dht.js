@@ -2,8 +2,8 @@
 
 var kademlia = window.kad;
 var address = location.hostname;
-var port = Number(location.port) || (protocol === 'https' ? 443 : 80);
 var protocol = location.protocol.substr(0, location.protocol.length - 1);
+var port = Number(location.port) || (protocol === 'https' ? 443 : 80);
 
 window.byrd.dht = kademlia({
   transport: byrd.ByrdClientTransport,
@@ -20,3 +20,17 @@ window.byrd.dht = kademlia({
   ],
   logLevel: 4
 });
+
+window.byrd.peerlist = function() {
+  var list = [];
+
+  for (var key in byrd.dht._buckets) {
+    var bucket = byrd.dht._buckets[key];
+
+    list = list.concat(bucket.getContactList().map(function(contact) {
+      return contact.toString();
+    }));
+  }
+
+  return list;
+};
