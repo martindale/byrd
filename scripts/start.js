@@ -17,9 +17,7 @@ config.storage = levelup(config.datadir);
 // redirect traffic from port 80 if port set to 443
 if (config.get('protocol') === 'https' && config.get('port') === 443) {
   http.createServer(express().use(function(req, res, next) {
-    var port  = (config.server.port === 443) ? '' : ':' + config.server.port;
-    var parts = ['https://', req.hostname, port, req.url];
-    return res.redirect(parts.join(''));
+    return res.redirect(['https://', req.hostname, req.url].join(''));
   })).listen(80);
 }
 
