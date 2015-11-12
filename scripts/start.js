@@ -18,7 +18,7 @@ config.storage = levelup(config.datadir);
 if (config.get('protocol') === 'https' && config.get('port') === 443) {
   http.createServer(express().use(function(req, res, next) {
     return res.redirect(['https://', req.hostname, req.url].join(''));
-  })).listen(80);
+  }).listen(80);
 }
 
 module.exports = kademlia(config, function(err) {});
