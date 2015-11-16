@@ -7,7 +7,7 @@ var levelup = require('levelup');
 var express = require('express');
 var http = require('http');
 
-config.validateKeyValuePair = function(key, value, done) {
+config.validate = function(key, value, done) {
   done(true); // TODO: add validation for content addressability
 };
 

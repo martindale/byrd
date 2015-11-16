@@ -1,6 +1,3332 @@
 (function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.kad = f()}})(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+/**
+* @module kad
+*/
 
-},{}],2:[function(require,module,exports){
+'use strict';
+
+var assert = require('assert');
+var async = require('async');
+var Node = require('./lib/node');
+
+/**
+* Creates a new K-Node and returns it
+* #createNode
+* @param {object} options
+* @param {function} onConnect
+*/
+module.exports = function createNode(options, onConnect) {
+  if (options.seeds) {
+    assert(Array.isArray(options.seeds), 'Invalid `options.seeds` supplied');
+  } else {
+    options.seeds = [];
+  }
+
+  for (var i = 0; i < options.seeds.length; i++) {
+    var seed = options.seeds[i];
+  }
+
+  var node = new Node(options);
+
+  async.eachSeries(options.seeds, connectToSeed, onConnect);
+
+  function connectToSeed(seed, done) {
+    node.connect(seed, done);
+  }
+
+  return node;
+};
+
+module.exports.Bucket = require('./lib/bucket');
+module.exports.Contact = require('./lib/contact');
+module.exports.Logger = require('./lib/logger');
+module.exports.Message = require('./lib/message');
+module.exports.Node = require('./lib/node');
+module.exports.Router = require('./lib/router');
+module.exports.RPC = require('./lib/rpc');
+module.exports.transports = require('./lib/transports');
+module.exports.utils = require('./lib/utils');
+module.exports.constants = require('./lib/constants');
+
+},{"./lib/bucket":2,"./lib/constants":3,"./lib/contact":4,"./lib/logger":8,"./lib/message":9,"./lib/node":10,"./lib/router":11,"./lib/rpc":12,"./lib/transports":14,"./lib/utils":18,"assert":21,"async":19}],2:[function(require,module,exports){
+/**
+* @module kad/bucket
+*/
+
+'use strict';
+
+var _ = require('lodash');
+var assert = require('assert');
+var constants = require('./constants');
+var Contact = require('./contact');
+
+/**
+* Represents a contact bucket
+* @constructor
+*/
+function Bucket() {
+  if (!(this instanceof Bucket)) {
+    return new Bucket();
+  }
+
+  this._contacts = [];
+}
+
+/**
+* Return the number of contacts in this bucket
+* #getSize
+*/
+Bucket.prototype.getSize = function() {
+  return this._contacts.length;
+};
+
+/**
+* Return the list of contacts in this bucket
+* #getContactList
+*/
+Bucket.prototype.getContactList = function() {
+  return _.clone(this._contacts);
+};
+
+/**
+* Return the contact at the given index
+* #getContact
+* @param {number} index
+*/
+Bucket.prototype.getContact = function(index) {
+  assert(index >= 0, 'Contact index cannot be negative');
+  assert(index < constants.B, 'Contact index cannot be greater than `B`');
+
+  return this._contacts[index] || null;
+};
+
+/**
+* Adds the contact to the bucket
+* #addContact
+* @param {object} contact
+*/
+Bucket.prototype.addContact = function(contact) {
+  assert(contact instanceof Contact, 'Invalid contact supplied');
+
+  if (!this.hasContact(contact.nodeID)) {
+    var index = _.sortedIndex(this._contacts, contact, function(contact) {
+      return contact.lastSeen;
+    });
+
+    this._contacts.splice(index, 0, contact);
+  }
+
+  return this;
+};
+
+/**
+* Removes the contact from the bucket
+* #removeContact
+* @param {object} contact
+*/
+Bucket.prototype.removeContact = function(contact) {
+  var index = this.indexOf(contact);
+
+  if (index >= 0) {
+    this._contacts.splice(index, 1);
+  }
+
+  return this;
+};
+
+/**
+* Returns boolean indicating that the nodeID is contained in the bucket
+* #hasContact
+* @param {string} nodeID
+*/
+Bucket.prototype.hasContact = function(nodeID) {
+  for (var i = 0; i < this.getSize(); i++) {
+    if (this._contacts[i].nodeID === nodeID) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+/**
+* Returns the index of the given contact
+* #indexOf
+* @param {object} contact
+*/
+Bucket.prototype.indexOf = function(contact) {
+  assert(contact instanceof Contact, 'Invalid contact supplied');
+
+  for (var i = 0; i < this.getSize(); i++) {
+    if (this.getContact(i).nodeID === contact.nodeID) {
+      return i;
+    }
+  }
+
+  return -1;
+};
+
+module.exports = Bucket;
+
+},{"./constants":3,"./contact":4,"assert":21,"lodash":270}],3:[function(require,module,exports){
+/**
+* @module kad/constants
+*/
+
+'use strict';
+
+var ms = require('ms');
+
+/**
+* Protocol constants
+* #exports
+* @see http://xlattice.sourceforge.net/components/protocol/kademlia/specs.html#constants
+*/
+module.exports = {
+
+  ALPHA: 3,
+  B: 160,
+  K: 20,
+
+  T_REFRESH: ms('3600s'),
+  T_REPLICATE: ms('3600s'),
+  T_REPUBLISH: ms('86400s'),
+
+  // T_EXPIRE is 5s higher than protocol spec to avoid republish race condition
+  T_EXPIRE: ms('86405s'),
+
+  T_RESPONSETIMEOUT: ms('5s'),
+
+  MESSAGE_TYPES: [
+    'PING',
+    'PONG',
+    'STORE',
+    'STORE_REPLY',
+    'FIND_NODE',
+    'FIND_NODE_REPLY',
+    'FIND_VALUE',
+    'FIND_VALUE_REPLY'
+  ]
+
+};
+
+},{"ms":272}],4:[function(require,module,exports){
+/**
+* @module kad/contact
+*/
+
+'use strict';
+
+var assert = require('assert');
+var utils = require('./utils');
+
+/**
+* Represent a contact (or peer)
+* @constructor
+* @param {object} options
+*/
+function Contact(options) {
+
+  assert(this instanceof Contact, 'Invalid instance was supplied');
+  assert(options instanceof Object, 'Invalid options were supplied');
+
+  Object.defineProperty(this, 'nodeID', {
+    value: options.nodeID || this._createNodeID(),
+    configurable: false,
+    enumerable: true
+  });
+
+  assert(utils.isValidKey(this.nodeID), 'Invalid nodeID was supplied');
+
+  this.seen();
+}
+
+/**
+* Updates the lastSeen property to right now
+* #seen
+*/
+Contact.prototype.seen = function() {
+  this.lastSeen = Date.now();
+};
+
+/* istanbul ignore next */
+/**
+* Unimplemented stub, called when no nodeID is passed to constructor.
+* #_createNodeID
+*/
+Contact.prototype._createNodeID = function() {
+  throw new Error('Method not implemented');
+};
+
+module.exports = Contact;
+
+},{"./utils":18,"assert":21}],5:[function(require,module,exports){
+/**
+* @module kad/contact
+*/
+
+'use strict';
+
+var assert = require('assert');
+var Contact = require('../contact');
+var inherits = require('util').inherits;
+var utils = require('../utils');
+
+inherits(AddressPortContact, Contact);
+
+/**
+* Represent a contact (or peer)
+* @constructor
+* @param {object} options
+*/
+function AddressPortContact(options) {
+
+  if (!(this instanceof AddressPortContact)) {
+    return new AddressPortContact(options);
+  }
+
+  assert(options instanceof Object, 'Invalid options were supplied');
+  assert(typeof options.address === 'string', 'Invalid address was supplied');
+  assert(typeof options.port === 'number', 'Invalid port was supplied');
+
+  this.address = options.address;
+  this.port = options.port;
+
+  Contact.call(this, options)
+}
+
+/**
+* Generate a NodeID by taking the SHA1 hash of the address and port
+* #_createNodeID
+*/
+AddressPortContact.prototype._createNodeID = function() {
+  return utils.createID(this.toString());
+};
+
+/**
+* Generate a user-friendly string for the contact
+* #_toString
+*/
+AddressPortContact.prototype.toString = function() {
+  return this.address + ':' + this.port;
+};
+
+module.exports = AddressPortContact;
+
+},{"../contact":4,"../utils":18,"assert":21,"util":254}],6:[function(require,module,exports){
+/**
+* @module kad/peer-contact
+*/
+
+'use strict';
+
+var assert = require('assert');
+var Contact = require('../contact.js');
+var inherits = require('util').inherits;
+var utils = require('../utils');
+
+inherits(WebRTCContact, Contact);
+
+/**
+* Represent a WebRTC contact
+* @constructor
+* @param {object} options
+*/
+function WebRTCContact(options) {
+  if (!(this instanceof WebRTCContact)) {
+    return new WebRTCContact(options);
+  }
+
+  assert(options instanceof Object, 'Invalid options were supplied');
+  assert(typeof options.nick === 'string', 'Invalid nick was supplied');
+
+  this.nick = options.nick;
+
+  Contact.call(this, options);
+}
+
+/**
+* Generate a NodeID by taking the SHA1 hash of the nickname
+* #_createNodeID
+*/
+WebRTCContact.prototype._createNodeID = function() {
+  return utils.createID(this.nick);
+};
+
+/**
+* Generate a user-friendly string for the contact
+* #_toString
+*/
+WebRTCContact.prototype.toString = function() {
+  return this.nick;
+};
+
+module.exports = WebRTCContact;
+
+},{"../contact.js":4,"../utils":18,"assert":21,"util":254}],7:[function(require,module,exports){
+/**
+* @module kad/item
+*/
+
+'use strict';
+
+var assert = require('assert');
+var constants = require('./constants');
+var utils = require('./utils');
+
+/**
+* Represents an item to store
+* @constructor
+* @param {string} key
+* @param {object} value
+* @param {string} publisher - nodeID
+* @param {number} timestamp - optional
+*/
+function Item(key, value, publisher, timestamp) {
+  if (!(this instanceof Item)) {
+    return new Item(key, value, publisher, timestamp);
+  }
+
+  assert.ok(typeof key === 'string', 'Invalid key supplied');
+  assert.ok(value, 'Invalid value supplied');
+  assert(utils.isValidKey(publisher), 'Invalid publisher nodeID supplied');
+
+  if (timestamp) {
+    assert(typeof timestamp === 'number', 'Invalid timestamp supplied');
+    assert(Date.now() >= timestamp, 'Timestamp cannot be in the future');
+  }
+
+  this.key = key;
+  this.value = value;
+  this.publisher = publisher;
+  this.timestamp = timestamp || Date.now();
+}
+
+module.exports = Item;
+
+},{"./constants":3,"./utils":18,"assert":21}],8:[function(require,module,exports){
+/**
+* @module kad/logger
+*/
+
+'use strict';
+
+var colors = require('colors/safe');
+
+/**
+* Handles logging to console
+* @constructor
+*/
+function Logger(level) {
+  if (!(this instanceof Logger)) {
+    return new Logger(level);
+  }
+
+  this.level = level || 0;
+  this.types = {
+    debug: {
+      level: 4,
+      color: colors.magenta
+    },
+    info: {
+      level: 3,
+      color: colors.blue
+    },
+    warn: {
+      level: 2,
+      color: colors.yellow
+    },
+    error: {
+      level: 1,
+      color: colors.red
+    }
+  };
+
+  this._bindLogTypes();
+}
+
+/**
+* Sets up log types as instance methods
+* #_bindLogTypes
+*/
+Logger.prototype._bindLogTypes = function() {
+  var self = this;
+
+  Object.keys(this.types).forEach(function(type) {
+    self[type] = function() {
+      if (self.level >= self.types[type].level) {
+        var prefix = self.types[type].color('{' + type + '}');
+        var args = Array.prototype.slice.call(arguments);
+
+        args[0] = prefix + ' ' + args[0];
+
+        console.log.apply(console, args);
+      }
+    }
+  });
+};
+
+module.exports = Logger;
+
+},{"colors/safe":268}],9:[function(require,module,exports){
+(function (Buffer){
+/**
+* @module kad/message
+*/
+
+'use strict';
+
+var assert = require('assert');
+var constants = require('./constants');
+var merge = require('merge');
+var Contact = require('./contact');
+
+/**
+* Represents a message to be sent over RPC
+* @constructor
+* @param {string} type
+* @param {object} params
+* @param {object} fromContact
+*/
+function Message(type, params, fromContact) {
+  if (!(this instanceof Message)) {
+    return new Message(type, params, fromContact);
+  }
+
+  assert(constants.MESSAGE_TYPES.indexOf(type) !== -1, 'Invalid message type');
+  assert(fromContact instanceof Contact, 'Invalid contact supplied');
+
+  this.type = type;
+  this.params = merge(params, fromContact);
+}
+
+/**
+* Serialize message to a Buffer
+* #serialize
+*/
+Message.prototype.serialize = function() {
+  return new Buffer(JSON.stringify(this), 'utf8');
+};
+
+module.exports = Message;
+
+}).call(this,require("buffer").Buffer)
+},{"./constants":3,"./contact":4,"assert":21,"buffer":23,"merge":271}],10:[function(require,module,exports){
+/**
+* @module kademlia/node
+*/
+
+'use strict';
+
+var merge = require('merge');
+var assert = require('assert');
+var _ = require('lodash');
+var async = require('async');
+var inherits = require('util').inherits;
+var utils = require('./utils');
+var events = require('events');
+var dgram = require('dgram');
+var constants = require('./constants');
+var Bucket = require('./bucket');
+var Contact = require('./contact');
+var Router = require('./router');
+var Message = require('./message');
+var Item = require('./item');
+var Logger = require('./logger');
+var transports = require('./transports');
+
+inherits(Node, events.EventEmitter);
+
+Node.DEFAULTS = {
+  transport: transports.UDP
+};
+
+/**
+* Represents a Kademlia node
+* @constructor
+* @param {object} options
+*/
+function Node(options) {
+  if (!(this instanceof Node)) {
+    return new Node(options);
+  }
+
+  events.EventEmitter.call(this);
+
+  this._options = merge(Object.create(Node.DEFAULTS), options);
+  this._storage = options.storage;
+
+  assert(typeof this._storage === 'object', 'No storage adapter supplied');
+  assert(typeof this._storage.get === 'function', 'Store has no `get` method');
+  assert(typeof this._storage.put === 'function', 'Store has no `put` method');
+  assert(typeof this._storage.del === 'function', 'Store has no `del` method');
+  assert(
+    typeof this._storage.createReadStream === 'function',
+    'Store has no `createReadStream` method'
+  );
+
+  this._buckets = {};
+  this._log = new Logger(options.logLevel);
+  this._rpc = new this._options.transport(options);
+  this._self = this._rpc._contact;
+
+  this._bindRPCMessageHandlers();
+  this._startReplicationInterval();
+  this._startExpirationInterval();
+
+  this._log.debug('node created with nodeID %s', this._self.nodeID);
+}
+
+/**
+* Connects to the overlay network
+* #connect
+* @param {string} options transport-specific contact options
+* @param {function} callback - optional
+*/
+Node.prototype.connect = function(options, callback) {
+  if (callback) {
+    this.once('connect', callback);
+    this.once('error', callback);
+  }
+
+  var self = this;
+  var seed = this._rpc._createContact(options);
+
+  this._log.debug('entering overlay network via %j', seed);
+
+  async.waterfall([
+    this._updateContact.bind(this, seed),
+    this._findNode.bind(this, this._self.nodeID),
+    this._refreshBucketsBeyondClosest.bind(this)
+  ], function(err) {
+    if (err) {
+      return self.emit('error', err);
+    }
+
+    self.emit('connect');
+  });
+
+  return this;
+};
+
+/**
+* Validate a key/value pair (defaults to always valid).
+* #_validateKeyValuePair
+* @param {string} key
+* @param {mixed} value
+* @param {function} callback
+*/
+Node.prototype._validateKeyValuePair = function(key, value, callback) {
+  if (typeof this._options.validate === 'function') {
+    return this._options.validate.apply(this, arguments);
+  }
+
+  callback(true);
+};
+
+/**
+* Set a key/value pair in the DHT
+* #set
+* @param {string} key
+* @param {mixed} value
+* @param {function} callback
+*/
+Node.prototype.put = function(key, value, callback) {
+  var node = this;
+
+  this._log.debug('attempting to set value for key %s', key);
+
+  this._validateKeyValuePair(key, value, function(isValid) {
+    if(!isValid) {
+      node._log.warn('failed to validate key/value pair for %s', key);
+      return callback(new Error('Failed to validate key/value pair'));
+    }
+
+    node._putValidatedKeyValue(key, value, callback);
+  });
+};
+
+/**
+* Set a validated key/value pair in the DHT
+* #set
+* @param {string} key
+* @param {mixed} value
+* @param {function} callback
+*/
+Node.prototype._putValidatedKeyValue = function(key, value, callback) {
+  var node = this;
+  var item = new Item(key, value, this._self.nodeID);
+  var message = new Message('STORE', item, this._self);
+
+  this._findNode(item.key, function(err, contacts) {
+    if (err) {
+      node._log.error('failed to find nodes - reason: %s', err.message);
+      return callback(err);
+    }
+
+    if (contacts.length === 0) {
+      node._log.error('no contacts are available');
+      contacts = node._getNearestContacts(key, constants.K, node._self.nodeID);
+    }
+
+    node._log.debug('found %d contacts for STORE operation', contacts.length);
+
+    async.each(contacts, function(contact, done) {
+      node._log.debug('sending STORE message to %j', contact);
+      node._rpc.send(contact, message, done);
+    }, callback);
+  });
+};
+
+/**
+* Get a value by it's key from the DHT
+* #get
+* @param {string} key
+* @param {function} callback
+*/
+Node.prototype.get = function(key, callback) {
+  var self = this;
+
+  this._log.debug('attempting to get value for key %s', key);
+
+  this._storage.get(key, function(err, value) {
+    if (!err && value) {
+      return callback(null, JSON.parse(value).value);
+    }
+
+    self._findValue(key, function(err, value) {
+      if (err) {
+        return callback(err);
+      }
+
+      callback(null, value);
+    });
+
+  });
+};
+
+/**
+* Setup event listeners for rpc messages
+* #_bindRPCMessageHandlers
+*/
+Node.prototype._bindRPCMessageHandlers = function() {
+  var self = this;
+
+  this._rpc.on('PING', this._handlePing.bind(this));
+  this._rpc.on('STORE', this._handleStore.bind(this));
+  this._rpc.on('FIND_NODE', this._handleFindNode.bind(this));
+  this._rpc.on('FIND_VALUE', this._handleFindValue.bind(this));
+  this._rpc.on('CONTACT_SEEN', this._updateContact.bind(this));
+
+  this._rpc.on('ready', function() {
+    self._log.debug('node listening on %j', self._self.toString());
+  });
+};
+
+/**
+* Replicate local storage every T_REPLICATE
+* #_startReplicationInterval
+*/
+Node.prototype._startReplicationInterval = function() {
+  setInterval(this._replicate.bind(this), constants.T_REPLICATE);
+};
+
+/**
+* Replicate local storage
+* #_replicate
+*/
+Node.prototype._replicate = function() {
+  var self = this;
+  var stream = this._storage.createReadStream();
+
+  this._log.info('starting local database replication');
+
+  stream.on('data', function(data) {
+    if (typeof data.value === 'string') {
+      try {
+        data.value = JSON.parse(data.value);
+      } catch(err) {
+        return self._log.error('failed to parse value from %s', data.value);
+      }
+    }
+
+    // if we are not the publisher, then replicate every T_REPLICATE
+    if (data.value.publisher !== self._self.nodeID) {
+      self.put(data.key, data.value.value, function(err) {
+        if (err) {
+          self._log.error('failed to replicate item at key %s', data.key);
+        }
+      });
+    // if we are the publisher, then only replicate every T_REPUBLISH
+    } else if (Date.now() <= data.value.timestamp + constants.T_REPUBLISH) {
+      self.put(data.key, data.value.value, function(err) {
+        if (err) {
+          self._log.error('failed to republish item at key %s', data.key);
+        }
+      });
+    }
+  });
+
+  stream.on('error', function(err) {
+    self._log.error('error while replicating: %s', err.message);
+  });
+
+  stream.on('end', function() {
+    self._log.info('database replication complete');
+  });
+};
+
+/**
+* Expire entries older than T_EXPIRE
+* #_startExpirationInterval
+*/
+Node.prototype._startExpirationInterval = function() {
+  setInterval(this._expire.bind(this), constants.T_EXPIRE);
+};
+
+/**
+* Expire entries older than T_EXPIRE
+* #_expire
+*/
+Node.prototype._expire = function() {
+  var self = this;
+  var stream = this._storage.createReadStream();
+
+  this._log.info('starting local database expiration');
+
+  stream.on('data', function(data) {
+    if (Date.now() <= data.value.timestamp + constants.T_EXPIRE) {
+      self._storage.del(data.key, function(err) {
+        if (err) {
+          self._log.error('failed to expire item at key %s', data.key);
+        }
+      });
+    }
+  });
+
+  stream.on('error', function(err) {
+    self._log.error('error while expiring: %s', err.message);
+  });
+
+  stream.on('end', function() {
+    self._log.info('database expiration complete');
+  });
+};
+
+/**
+* Refreshes the buckets farther than the closest known
+* #_refreshBucketsBeyondClosest
+* @param {string} type
+* @param {array} contacts
+* @param {function} done
+*/
+Node.prototype._refreshBucketsBeyondClosest = function(contacts, done) {
+  var bucketIndexes = Object.keys(this._buckets);
+  var leastBucket = _.min(bucketIndexes);
+  var refreshBuckets = bucketIndexes.filter(bucketFilter);
+  var queue = async.queue(this._refreshBucket.bind(this), 1);
+
+  this._log.debug('refreshing buckets farthest than closest known');
+
+  refreshBuckets.forEach(function(index) {
+    queue.push(index);
+  });
+
+  function bucketFilter(index) {
+    return index >= leastBucket;
+  }
+
+  done();
+};
+
+/**
+* Refreshes the bucket at the given index
+* #_refreshBucket
+* @param {number} index
+* @param {function} callback
+*/
+Node.prototype._refreshBucket = function(index, callback) {
+  var random = utils.getRandomInBucketRangeBuffer(index);
+
+  this._findNode(random.toString('hex'), callback);
+};
+
+/**
+* Search contacts for the value at given key
+* #_findValue
+* @param {string} key
+* @param {function} callback
+*/
+Node.prototype._findValue = function(key, callback) {
+  var self = this;
+
+  this._log.debug('searching for value at key %s', key);
+
+  this._find(key, 'VALUE', function(err, type, value) {
+    if (err || type === 'NODE') {
+      return callback(new Error('Failed to find value for key: ' + key));
+    }
+
+    self._log.debug('found value for key %s', key);
+
+    callback(null, value);
+  });
+};
+
+/**
+* Search contacts for nodes close to the given key
+* #_findNode
+* @param {string} nodeID
+* @param {function} callback
+*/
+Node.prototype._findNode = function(nodeID, callback) {
+  var self = this;
+
+  this._log.debug('searching for nodes close to key %s', nodeID);
+
+  this._find(nodeID, 'NODE', function(err, type, contacts) {
+    if (err) {
+      return callback(err);
+    }
+
+    self._log.debug('found %d nodes close to key %s', contacts.length, nodeID);
+
+    callback(null, contacts);
+  });
+};
+
+/**
+* Search contacts for nodes/values
+* #_find
+* @param {string} key
+* @param {string} type - ['NODE', 'VALUE']
+* @param {function} callback
+*/
+Node.prototype._find = function(key, type, callback) {
+  Router(type, key, this).route(callback);
+};
+
+/**
+* Update the contact's status
+* #_updateContact
+* @param {object} contact
+* @param {function} callback - optional
+*/
+Node.prototype._updateContact = function(contact, callback) {
+  assert(contact instanceof Contact, 'Invalid contact supplied');
+
+  this._log.debug('updating contact %j', contact);
+
+  var self = this;
+  var bucketIndex = utils.getBucketIndex(this._self.nodeID, contact.nodeID);
+
+  assert(bucketIndex < constants.B);
+
+  if (!this._buckets[bucketIndex]) {
+    this._log.debug('creating new bucket for contact at index %d', bucketIndex);
+    this._buckets[bucketIndex] = new Bucket();
+  }
+
+  var bucket = this._buckets[bucketIndex];
+  var inBucket = bucket.hasContact(contact.nodeID);
+  var bucketHasRoom = bucket.getSize() < constants.K;
+  var contactAtHead = bucket.getContact(0);
+  var pingMessage = new Message('PING', {}, this._self);
+
+  contact.seen();
+
+  if (inBucket) {
+    this._log.debug('contact already in bucket, moving to tail');
+    bucket.removeContact(contact);
+    bucket.addContact(contact);
+    complete();
+  } else if (bucketHasRoom) {
+    this._log.debug('contact not in bucket, moving to head');
+    bucket.addContact(contact);
+    complete();
+  } else {
+    this._log.debug('no room in bucket, sending PING to contact at head');
+    this._rpc.send(contactAtHead, pingMessage, function(err) {
+      if (err) {
+        self._log.debug('head contact did not respond, replacing with new');
+        bucket.removeContact(contactAtHead);
+        bucket.addContact(contact);
+      }
+
+      complete();
+    });
+  }
+
+  function complete() {
+    if (typeof callback === 'function') {
+      callback();
+    }
+  }
+
+  return contact;
+};
+
+/**
+* Handle `PING` RPC
+* #_handlePing
+* @param {object} params
+*/
+Node.prototype._handlePing = function(params) {
+  var contact = this._rpc._createContact(params);
+  var message = new Message('PONG', { referenceID: params.rpcID }, this._self);
+
+  this._log.info('received PING from %s, sending PONG', params.nodeID);
+  this._rpc.send(contact, message);
+};
+
+/**
+* Handle `STORE` RPC
+* #_handleStore
+* @param {object} params
+*/
+Node.prototype._handleStore = function(params) {
+  var node = this;
+  var item;
+
+  try {
+    item = new Item(params.key, params.value, params.nodeID);
+  } catch(err) {
+    return;
+  }
+
+  this._log.info('received valid STORE from %s', params.nodeID);
+
+  this._validateKeyValuePair(item.key, params.value, function(isValid) {
+    if(!isValid) {
+      node._log.warn('failed to validate key/value pair for %s', item.key);
+      return;
+    }
+
+    node._storeValidatedKeyValue(item, params);
+  });
+};
+
+/**
+* Add the validated ke/value to storage
+* #_storeValidatedKeyValue
+* @param {object} item
+* @param {object} params
+*/
+Node.prototype._storeValidatedKeyValue = function(item, params) {
+  var node = this;
+  this._storage.put(item.key, JSON.stringify(item), function(err) {
+    var contact = node._rpc._createContact(params);
+    var message = new Message('STORE_REPLY', {
+      referenceID: params.rpcID,
+      success: !!err
+    }, node._self);
+
+    node._log.debug('successful store, notifying %s', params.nodeID);
+    node._rpc.send(contact, message);
+  });
+};
+
+/**
+* Handle `FIND_NODE` RPC
+* #_handleFindNode
+* @param {object} params
+*/
+Node.prototype._handleFindNode = function(params) {
+  this._log.info('received FIND_NODE from %j', params);
+
+  var contact = this._rpc._createContact(params);
+  var near = this._getNearestContacts(params.key, constants.K, params.nodeID);
+  var message = new Message('FIND_NODE_REPLY', {
+    referenceID: params.rpcID,
+    contacts: near
+  }, this._self);
+
+  this._log.debug('sending %s nearest %d contacts', params.nodeID, near.length);
+  this._rpc.send(contact, message);
+};
+
+/**
+* Handle `FIND_VALUE` RPC
+* #_handleFindValue
+* @param {object} params
+*/
+Node.prototype._handleFindValue = function(params) {
+  var node = this;
+  var contact = this._rpc._createContact(params);
+  var limit = constants.K;
+
+  this._log.info('received valid FIND_VALUE from %s', params.nodeID);
+
+  this._storage.get(params.key, function(err, value) {
+    if (err || !value) {
+      node._log.debug('value not found, sending contacts to %s', params.nodeID);
+
+      var notFoundMessage = new Message('FIND_VALUE_REPLY', {
+        referenceID: params.rpcID,
+        contacts: node._getNearestContacts(params.key, limit, params.nodeID)
+      }, node._self);
+
+      return node._rpc.send(contact, notFoundMessage);
+    }
+
+    node._log.debug('found value, sending to %s', params.nodeID);
+
+    var foundMessage = new Message('FIND_VALUE_REPLY', {
+      referenceID: params.rpcID,
+      value: value
+    }, contact);
+
+    node._rpc.send(contact, foundMessage);
+  });
+};
+
+/**
+* Return contacts closest to the given key
+* #_getNearestContacts
+* @param {string} key
+* @param {number} limit
+* @param {string} nodeID
+*/
+Node.prototype._getNearestContacts = function(key, limit, nodeID) {
+  var contacts = [];
+  var hashedKey = utils.createID(key);
+  var initialIndex = utils.getBucketIndex(this._self.nodeID, hashedKey);
+  var ascBucketIndex = initialIndex;
+  var descBucketIndex = initialIndex;
+
+  if (this._buckets[initialIndex]) {
+    addNearestFromBucket(this._buckets[initialIndex]);
+  }
+
+  while (contacts.length < limit && ascBucketIndex < constants.B) {
+    ascBucketIndex++;
+
+    if (this._buckets[ascBucketIndex]) {
+      addNearestFromBucket(this._buckets[ascBucketIndex]);
+    }
+  }
+
+  while (contacts.length < limit && descBucketIndex >= 0) {
+    descBucketIndex--;
+
+    if (this._buckets[descBucketIndex]) {
+      addNearestFromBucket(this._buckets[descBucketIndex]);
+    }
+  }
+
+  function addToContacts(contact) {
+    var isContact = contact instanceof Contact;
+    var poolNotFull = contacts.length < limit;
+    var notRequester = contact.nodeID !== nodeID;
+
+    if (isContact && poolNotFull && notRequester) {
+      contacts.push(contact);
+    }
+  }
+
+  function addNearestFromBucket(bucket) {
+    var contactList = bucket.getContactList();
+    var distances = contactList.map(addDistance).sort(sortKeysByDistance);
+    var howMany = limit - contacts.length;
+
+    distances.splice(0, howMany).map(pluckContact).forEach(addToContacts);
+  }
+
+  function pluckContact(c) {
+    return c.contact;
+  }
+
+  function sortKeysByDistance(a, b) {
+    return utils.compareKeys(a.distance, b.distance);
+  }
+
+  function addDistance(contact) {
+    return {
+      contact: contact,
+      distance: utils.getDistance(contact.nodeID, hashedKey)
+    };
+  }
+
+  return contacts;
+};
+
+module.exports = Node;
+
+},{"./bucket":2,"./constants":3,"./contact":4,"./item":7,"./logger":8,"./message":9,"./router":11,"./transports":14,"./utils":18,"assert":21,"async":19,"dgram":20,"events":219,"lodash":270,"merge":271,"util":254}],11:[function(require,module,exports){
+/**
+* @module kad/router
+*/
+
+'use strict';
+
+var assert = require('assert');
+var async = require('async');
+var _ = require('lodash');
+var constants = require('./constants');
+var utils = require('./utils');
+var Message = require('./message');
+var Contact = require('./contact');
+
+/**
+* Represents a router for finding nodes and values
+* @constructor
+* @param {string} type - ['NODE','VALUE']
+* @param {string} key - key to find close nodes/value
+* @param {object} node - the node executing the route
+*/
+function Router(type, key, node) {
+  if (!(this instanceof Router)) {
+    return new Router(type, key, node);
+  }
+
+  assert(['NODE', 'VALUE'].indexOf(type) !== -1, 'Invalid search type');
+
+  this.node = node;
+  this.type = type;
+  this.key = key;
+  this.hashedKey = utils.createID(key);
+
+  this.limit = constants.ALPHA;
+  this.shortlist = node._getNearestContacts(key, this.limit, node._self.nodeID);
+  this.closestNode = this.shortlist[0];
+  this.previousClosestNode = null;
+  this.contacted = {};
+  this.foundValue = false;
+  this.value = null;
+  this.contactsWithoutValue = [];
+}
+
+/**
+* Execute this router's find operation with the shortlist
+* #route
+* @param {function} callback
+*/
+Router.prototype.route = function(callback) {
+  if (!this.closestNode) {
+    return callback(new Error('Not connected to any peers'));
+  }
+
+  this.closestNodeDistance = utils.getDistance(
+    this.hashedKey,
+    this.closestNode.nodeID
+  );
+
+  this.message = new Message('FIND_' + this.type, {
+    key: this.key
+  }, this.node._self);
+
+  this._iterativeFind(this.shortlist, callback);
+};
+
+/**
+* Execute the find operation for this router type
+* #iterativeFind
+* @param {array} contacts
+* @param {function} callback
+*/
+Router.prototype._iterativeFind = function(contacts, callback) {
+  var self = this;
+
+  async.each(contacts, this._queryContact.bind(this), function(err) {
+    self._handleQueryResults(callback);
+  });
+};
+
+/**
+* Send this router's RPC message to the contact
+* #_queryContact
+* @param {object} contactInfo
+* @param {function} callback
+*/
+Router.prototype._queryContact = function(contactInfo, callback) {
+  var self = this;
+  var contact = this.node._rpc._createContact(contactInfo);
+
+  this.node._rpc.send(contact, this.message, function(err, params) {
+    if (err) {
+      self._removeFromShortList(contact.nodeID);
+      return callback();
+    }
+
+    self._handleFindResult(params, contact, callback);
+  });
+};
+
+/**
+* Handle the results of the contact query
+* #_handleFindResult
+* @param {object} params - message response params
+* @param {object} contact
+* @param {function} callback
+*/
+Router.prototype._handleFindResult = function(params, contact, callback) {
+  var self = this;
+  var distance = utils.getDistance(this.hashedKey, contact.nodeID);
+
+  this.contacted[contact.nodeID] = this.node._updateContact(contact);
+
+  if (utils.compareKeys(distance, this.closestNodeDistance) === -1) {
+    this.previousClosestNode = this.closestNode;
+    this.closestNode = contact;
+    this.closestNodeDistance = distance;
+  }
+
+  if(this.type === 'NODE') {
+    this._addToShortList(params.contacts);
+    return callback();
+  }
+
+  if(!params.value) {
+    this.contactsWithoutValue.push(contact);
+    this._addToShortList(params.contacts);
+    return callback();
+  }
+
+  var parsedValue;
+  try {
+    parsedValue = JSON.parse(params.value).value;
+  } catch(err) {
+    this.node._log.warn('failed to parse value %s', params.value);
+    return rejectContact();
+  }
+
+  this.node._validateKeyValuePair(this.key, parsedValue, function(isValid) {
+    if(!isValid) {
+      self.node._log.warn('failed to validate key/value pair for %s', self.key);
+      return rejectContact();
+    }
+
+    self.foundValue = true;
+    self.value = parsedValue;
+    callback();
+  });
+
+  function rejectContact() {
+    self._removeFromShortList(contact.nodeID);
+    callback();
+  }
+};
+
+/**
+* Add contacts to the shortlist, preserving nodeID uniqueness
+* #_addToShortList
+* @param {array} contacts
+*/
+Router.prototype._addToShortList = function(contacts) {
+  assert(Array.isArray(contacts), 'No contacts supplied');
+  this.shortlist = this.shortlist.concat(contacts);
+  this.shortlist = _.uniq(this.shortlist, false, 'nodeID');
+};
+
+/**
+* Remove contacts with the nodeID from the shortlist
+* #_removeFromShortList
+* @param {string} nodeID
+*/
+Router.prototype._removeFromShortList = function(nodeID) {
+  this.shortlist = _.reject(this.shortlist, function(c) {
+    return c.nodeID === nodeID;
+  });
+};
+
+/**
+* Handle the results of all the executed queries
+* #_handleQueryResults
+* @param {function} callback
+*/
+Router.prototype._handleQueryResults = function(callback) {
+  var self = this;
+
+  if (this.foundValue) {
+    return this._handleValueReturned(callback);
+  }
+
+  var closestNodeUnchanged = this.closestNode === this.previousClosestNode;
+  var shortlistFull = this.shortlist.length >= constants.K;
+
+  if (closestNodeUnchanged || shortlistFull) {
+    return callback(null, 'NODE', this.shortlist);
+  }
+
+  var remainingContacts = _.reject(this.shortlist, function(c) {
+    return self.contacted[c.nodeID];
+  });
+
+  if (remainingContacts.length === 0) {
+    callback(null, 'NODE', this.shortlist);
+  } else {
+    this._iterativeFind(remainingContacts.splice(0, constants.ALPHA), callback);
+  }
+};
+
+/**
+* Handle a value being returned and store at closest nodes that didn't have it
+* #_handleValueReturned
+* @param {function} callback
+*/
+Router.prototype._handleValueReturned = function(callback) {
+  var self = this;
+
+  var distances = this.contactsWithoutValue.map(function(contact) {
+    return {
+      distance: utils.getDistance(contact.nodeID, self.node._self.nodeID),
+      contact: contact
+    };
+  });
+
+  distances.sort(function(a, b) {
+    return utils.compareKeys(a.distance, b.distance);
+  });
+
+  if (distances.length >= 1) {
+    var closestWithoutValue = distances[0].contact;
+    var message = new Message('STORE', {
+      key: self.key,
+      value: self.value
+    }, this.node._self);
+
+    this.node._rpc.send(closestWithoutValue, message);
+  }
+
+  callback(null, 'VALUE', self.value);
+};
+
+module.exports = Router;
+
+},{"./constants":3,"./contact":4,"./message":9,"./utils":18,"assert":21,"async":19,"lodash":270}],12:[function(require,module,exports){
+/**
+* @module kad/rpc
+*/
+
+'use strict';
+
+var inherits = require('util').inherits;
+var events = require('events');
+var assert = require('assert');
+var dgram = require('dgram');
+var hat = require('hat');
+var merge = require('merge');
+var constants = require('./constants');
+var Contact = require('./contact');
+var Message = require('./message');
+var Logger = require('./logger');
+
+inherits(RPC, events.EventEmitter);
+
+/**
+* Represents an RPC interface
+* @constructor
+* @param {object} options
+*/
+function RPC(options) {
+
+  assert(this instanceof RPC, 'Invalid instance supplied');
+
+  var self = this;
+
+  events.EventEmitter.call(this);
+
+  this._createMessageID = hat.rack(constants.B);
+  this._pendingCalls = {};
+  this._contact = this._createContact(options);
+  this._log = new Logger(options ? options.logLevel : 0);
+
+  setInterval(this._expireCalls.bind(this), constants.T_RESPONSETIMEOUT + 5);
+}
+
+/**
+* Send a RPC to the given contact
+* #send
+* @param {object} contact
+* @param {object} message
+* @param {function} callback
+*/
+RPC.prototype.send = function(contact, message, callback) {
+  contact = this._createContact(contact);
+  
+  assert(contact instanceof Contact, 'Invalid contact supplied');
+  assert(message instanceof Message, 'Invalid message supplied');
+
+  merge(message.params, {
+    rpcID: this._createMessageID()
+  });
+
+  var data = message.serialize();
+  var offset = 0;
+
+  this._send(data, contact);
+
+  if (typeof callback === 'function') {
+    this._pendingCalls[message.params.rpcID] = {
+      timestamp: Date.now(),
+      callback: callback
+    };
+  }
+};
+
+/**
+* Close the underlying socket
+* #close
+*/
+RPC.prototype.close = function() {
+  this._close();
+};
+
+/**
+* Handle incoming messages
+* #_handleMessage
+* @param {buffer} buffer
+* @param {object} info
+*/
+RPC.prototype._handleMessage = function(buffer, info) {
+  var message;
+  var data;
+  var params;
+  var contact;
+
+  try {
+    data = JSON.parse(buffer.toString('utf8'));
+    params = data.params;
+    contact = this._createContact(params);
+    message = new Message(data.type, params, contact);
+    this._log.debug('received valid message %j', message);
+  } catch(err) {
+    return this.emit('MESSAGE_DROP', buffer, info);
+  }
+
+  var referenceID = message.params.referenceID;
+  var pendingCall = this._pendingCalls[referenceID];
+
+  if (referenceID && pendingCall) {
+    pendingCall.callback(null, message.params);
+    delete this._pendingCalls[referenceID];
+  } else {
+    this.emit('CONTACT_SEEN', contact);
+    this.emit(message.type, message.params);
+  }
+};
+
+/**
+* Expire RPCs that have not received a reply
+* #_expireCalls
+*/
+RPC.prototype._expireCalls = function() {
+  for (var rpcID in this._pendingCalls) {
+    var pendingCall = this._pendingCalls[rpcID];
+    var timePassed = Date.now() - pendingCall.timestamp;
+
+    if (timePassed > constants.T_RESPONSETIMEOUT) {
+      pendingCall.callback(new Error('RPC with ID `' + rpcID + '` timed out'));
+      delete this._pendingCalls[rpcID];
+    }
+  }
+};
+
+/* istanbul ignore next */
+/**
+* Unimplemented stub, called on close()
+* #_close
+*/
+RPC.prototype._close = function() {
+  throw new Error('Method not implemented');
+};
+
+/* istanbul ignore next */
+/**
+* Unimplemented stub, called on send()
+* #_send
+* @param {buffer} data
+* @param {Contact} contact
+*/
+RPC.prototype._send = function(data, contact) {
+  throw new Error('Method not implemented');
+};
+
+/* istanbul ignore next */
+/**
+* Unimplemented stub, called in RPC()
+* #_createContact
+* @param {object} options
+*/
+RPC.prototype._createContact = function(options) {
+  throw new Error('Method not implemented');
+};
+
+module.exports = RPC;
+
+},{"./constants":3,"./contact":4,"./logger":8,"./message":9,"assert":21,"dgram":20,"events":219,"hat":269,"merge":271,"util":254}],13:[function(require,module,exports){
+(function (Buffer){
+/**
+* @module kad/transports/http
+*/
+
+'use strict';
+
+var AddressPortContact = require('../contacts/address-port-contact');
+var inherits = require('util').inherits;
+var http = require('http');
+var RPC = require('../rpc');
+
+inherits(HTTPTransport, RPC);
+
+/**
+* Represents an HTTP transport for RPC
+* @constructor
+* @param {object} options
+*/
+function HTTPTransport(options) {
+  if (!(this instanceof HTTPTransport)) {
+    return new HTTPTransport(options);
+  }
+
+  RPC.call(this, options);
+
+  var self = this;
+
+  this._queuedResponses = {};
+
+  this._server = http.createServer(function(req, res) {
+    var payload = '';
+
+    req.on('data', function(chunk) {
+      payload += chunk.toString();
+    });
+
+    req.on('end', function() {
+      try {
+        var parsed = JSON.parse(payload);
+
+        if (parsed.params.rpcID) {
+          self._queuedResponses[parsed.params.rpcID] = res;
+        }
+      } catch(err) {
+        // noop
+      }
+
+      self._handleMessage(new Buffer(payload), {});
+    });
+  });
+
+  this._server.listen(this._contact.port, this._contact.address, function() {
+    self.emit('ready');
+  });
+}
+
+/**
+* Create a HTTP Contact
+* #_createContact
+* @param {object} options
+*/
+HTTPTransport.prototype._createContact = function(options) {
+  return new AddressPortContact(options);
+}
+
+/**
+* Send a RPC to the given contact
+* #_send
+* @param {buffer} data
+* @param {Contact} contact
+*/
+HTTPTransport.prototype._send = function(data, contact) {
+  var self = this;
+  var parsed = JSON.parse(data.toString());
+  var referenceID = parsed.params.referenceID;
+
+  if (referenceID && this._queuedResponses[referenceID]) {
+    this._queuedResponses[referenceID].end(data);
+    delete this._queuedResponses[referenceID];
+    return;
+  }
+
+  var options = {
+    hostname: contact.address,
+    port: contact.port,
+    method: 'POST'
+  };
+  var req = http.request(options, handleResponse);
+
+  function handleResponse(res) {
+    var payload = '';
+
+    res.on('data', function(chunk) {
+      payload += chunk.toString();
+    });
+
+    res.on('end', function() {
+      self._handleMessage(new Buffer(payload), {});
+    });
+  }
+
+  req.on('error', function(err) {
+    self._handleMessage(null);
+  });
+
+  req.end(data);
+};
+
+/**
+* Close the underlying socket
+* #_close
+*/
+HTTPTransport.prototype._close = function() {
+  this._server.close();
+};
+
+module.exports = HTTPTransport;
+
+}).call(this,require("buffer").Buffer)
+},{"../contacts/address-port-contact":5,"../rpc":12,"buffer":23,"http":242,"util":254}],14:[function(require,module,exports){
+/**
+* @module kad/transports
+*/
+
+'use strict';
+
+module.exports = {
+  TCP: require('./tcp'),
+  UDP: require('./udp'),
+  WebRTC: require('./webrtc'),
+  HTTP: require('./http')
+};
+
+},{"./http":13,"./tcp":15,"./udp":16,"./webrtc":17}],15:[function(require,module,exports){
+(function (Buffer){
+/**
+* @module kad/transports/tcp
+*/
+
+'use strict';
+
+var inherits = require('util').inherits;
+var clarinet = require('clarinet');
+var net = require('net');
+var AddressPortContact = require('../contacts/address-port-contact');
+var Message = require('../message');
+var RPC = require('../rpc');
+var utils = require('../utils');
+
+inherits(TCPTransport, RPC);
+
+/**
+* Represents an RPC interface over TCP
+* @constructor
+* @param {object} options
+*/
+function TCPTransport(options) {
+  if (!(this instanceof TCPTransport)) {
+    return new TCPTransport(options);
+  }
+
+  var self = this;
+
+  RPC.call(this, options);
+
+  this._socket = net.createServer(this._handleConnection.bind(this));
+
+  this._socket.on('error', function(err) {
+    var contact = self._contact;
+    self._log.warn('failed to bind to supplied address %s', contact.address);
+    self._log.info('binding to all interfaces as a fallback');
+    self._socket.close();
+
+    self._socket = net.createServer(self._handleConnection.bind(self));
+
+    self._socket.listen(contact.port);
+  });
+
+  this._socket.on('listening', function() {
+    self.emit('ready');
+  });
+
+  this._socket.listen(this._contact.port, this._contact.address);
+}
+
+/**
+* Create a TCP Contact
+* #_createContact
+* @param {object} options
+*/
+TCPTransport.prototype._createContact = function(options) {
+  return new AddressPortContact(options);
+};
+
+/**
+* Send a RPC to the given contact
+* #_send
+* @param {buffer} data
+* @param {Contact} contact
+*/
+TCPTransport.prototype._send = function(data, contact) {
+  var self = this;
+  var sock = net.createConnection(contact.port, contact.address);
+
+  sock.on('error', function(err) {
+    self._log.error('error connecting to peer', err);
+  });
+
+  sock.end(data);
+};
+
+/**
+* Close the underlying socket
+* #_close
+*/
+TCPTransport.prototype._close = function() {
+  this._socket.close();
+};
+
+/**
+* Handle incoming connection
+* #_handleConnection
+* @param {object} socket
+*/
+TCPTransport.prototype._handleConnection = function(socket) {
+  var self = this;
+  var addr = socket.remoteAddress;
+  var port = socket.remotePort;
+  var parser = clarinet.createStream();
+  var buffer = '';
+  var opened = 0;
+  var closed = 0;
+
+  this._log.info('connection opened with %s:%s', addr, port);
+
+  parser.on('openobject', function(key) {
+    opened++;
+  });
+
+  parser.on('closeobject', function() {
+    closed++;
+
+    if (opened === closed) {
+      self._handleMessage(new Buffer(buffer), { address: addr, port: port });
+
+      buffer = '';
+      opened = 0;
+      closed = 0;
+    }
+  });
+
+  parser.on('error', function(err) {
+    socket.close();
+  });
+
+  socket.on('error', function(err) {
+    self._log.error('error communicating with peer %s:%s', addr, port);
+  });
+
+  socket.on('data', function(data) {
+    buffer += data.toString('utf8');
+    parser.write(data.toString('utf8'));
+  });
+};
+
+module.exports = TCPTransport;
+
+}).call(this,require("buffer").Buffer)
+},{"../contacts/address-port-contact":5,"../message":9,"../rpc":12,"../utils":18,"buffer":23,"clarinet":258,"net":20,"util":254}],16:[function(require,module,exports){
+/**
+* @module kad/transports/udp
+*/
+
+'use strict';
+
+var AddressPortContact = require('../contacts/address-port-contact');
+var inherits = require('util').inherits;
+var dgram = require('dgram');
+var RPC = require('../rpc');
+
+inherits(UDPTransport, RPC);
+
+/**
+* Represents an UDP transport for RPC
+* @constructor
+* @param {object} options
+*/
+function UDPTransport(options) {
+  if (!(this instanceof UDPTransport)) {
+    return new UDPTransport(options);
+  }
+
+  var self = this;
+  var socketOptions = { type: 'udp4', reuseAddr: true };
+  var socketMessageHandler = this._handleMessage.bind(this);
+
+  RPC.call(this, options);
+
+  this._socket = dgram.createSocket(socketOptions, socketMessageHandler);
+
+  this._socket.on('error', function(err) {
+    var contact = self._contact;
+    self._log.warn('failed to bind to supplied address %s', contact.address);
+    self._log.info('binding to all interfaces as a fallback');
+    self._socket.close();
+
+    self._socket = dgram.createSocket(socketOptions, socketMessageHandler);
+
+    self._socket.bind(contact.port);
+  });
+
+  this._socket.on('listening', function() {
+    self.emit('ready');
+  });
+
+  this._socket.bind(this._contact.port, this._contact.address);
+}
+
+/**
+* Create a UDP Contact
+* #_createContact
+* @param {object} options
+*/
+UDPTransport.prototype._createContact = function(options) {
+  return new AddressPortContact(options);
+}
+
+/**
+* Send a RPC to the given contact
+* #_send
+* @param {buffer} data
+* @param {Contact} contact
+*/
+UDPTransport.prototype._send = function(data, contact) {
+  this._socket.send(data, 0, data.length, contact.port, contact.address);
+};
+
+/**
+* Close the underlying socket
+* #_close
+*/
+UDPTransport.prototype._close = function() {
+  this._socket.close();
+};
+
+module.exports = UDPTransport;
+
+},{"../contacts/address-port-contact":5,"../rpc":12,"dgram":20,"util":254}],17:[function(require,module,exports){
+/**
+* @module kad/transports/webrtc
+*/
+
+'use strict';
+
+var assert = require('assert');
+var hat = require('hat');
+var inherits = require('util').inherits;
+var WebRTCContact = require('../contacts/webrtc-contact');
+var RPC = require('../rpc');
+var SimplePeer = require('simple-peer');
+
+inherits(WebRTCTransport, RPC);
+
+/**
+* Represents an RPC interface over WebRTC
+* @constructor
+* @param {object} options
+*/
+function WebRTCTransport(options) {
+  if (!(this instanceof WebRTCTransport)) {
+    return new WebRTCTransport(options);
+  }
+
+  assert(options instanceof Object, 'Invalid options were supplied');
+  assert(options.signaller instanceof Object, 'Invalid signaller was supplied');
+
+  var self = this
+
+  RPC.call(this, options);
+
+  this._peers = {};
+  this._wrtc = options.wrtc;
+  this._signaller = options.signaller;
+  this._signalHandler = this._onSignal.bind(this);
+  this._signaller.addListener(this._contact.nick, this._signalHandler)
+
+  setTimeout(this.emit.bind(this, 'ready'));
+}
+
+/**
+* Handle a message sent through `_signaller` from another peer
+* #_onSignal
+* @param {object} signallerMessage
+*/
+WebRTCTransport.prototype._onSignal = function(signallerMessage) {
+  var self = this;
+  var signal = signallerMessage.signal;
+  var sender = signallerMessage.sender;
+  var handshakeID = signallerMessage.handshakeID;
+  var peer = this._peers[signallerMessage.handshakeID];
+  if(!peer) {
+    peer = this._createPeer(sender, handshakeID, false);
+    peer.once('data', function(data) {
+      self._handleMessage(data, { nick: signallerMessage.sender });
+    });
+  }
+  peer.signal(signal);
+}
+
+/**
+* Create a WebRTC Contact
+* #_createContact
+* @param {object} options
+*/
+WebRTCTransport.prototype._createContact = function(options) {
+  return new WebRTCContact(options);
+};
+
+/**
+* Send a RPC to the given contact
+* #_send
+* @param {buffer} data
+* @param {Contact} contact
+*/
+WebRTCTransport.prototype._send = function(data, contact) {
+  var self = this;
+  var handshakeID = hat();
+  var newPeer = this._createPeer(contact.nick, handshakeID, true);
+  newPeer.once('connect', function() {
+    newPeer.send(data);
+    setTimeout(function() {
+      newPeer.destroy();
+    });
+  });
+};
+
+/**
+* Initialize a WebRTC peer and store it in `_peers`
+* #_createPeer
+* @param {string} nick
+* @param {string} handshakeID
+* @param {boolean} initiator
+*/
+WebRTCTransport.prototype._createPeer = function(nick, handshakeID, initiator) {
+  var self = this;
+  var peer = new SimplePeer({ wrtc: this._wrtc, initiator: initiator });
+  peer.on('signal', function(signal) {
+    self._signaller.emit(nick, {
+      sender: self._contact.nick,
+      handshakeID: handshakeID,
+      signal: signal
+    });
+  });
+  peer.on('error', function(err) {
+    self._log.error('peer encountered an error %s', err.message);
+  });
+  peer.once('close', function() {
+    peer.removeAllListeners('data');
+    peer.removeAllListeners('signal');
+    peer.removeAllListeners('error');
+    delete self._peers[handshakeID];
+  })
+  this._peers[handshakeID] = peer;
+  return peer;
+}
+
+/**
+* Close the underlying socket
+* #_close
+*/
+WebRTCTransport.prototype._close = function() {
+  var self = this;
+  Object.keys(this._peers).forEach(function(handshakeID) {
+    self._peers[handshakeID].destroy();
+  });
+  this._peers = {};
+  this._signaller.removeListener(this._contact.nick, this._signalHandler);
+};
+
+module.exports = WebRTCTransport;
+
+},{"../contacts/webrtc-contact":6,"../rpc":12,"assert":21,"hat":269,"simple-peer":273,"util":254}],18:[function(require,module,exports){
+(function (Buffer){
+/**
+* @module kad/utils
+*/
+
+'use strict';
+
+var assert = require('assert');
+var crypto = require('crypto');
+var constants = require('./constants');
+
+/**
+* Validate a key
+* #isValidKey
+*/
+exports.isValidKey = function(key) {
+  return !!key && key.length === constants.B / 4;
+};
+
+/**
+* Create a valid ID from the given string
+* #createID
+* @param {string} data
+*/
+exports.createID = function(data) {
+  return crypto.createHash('sha1').update(data).digest('hex');
+};
+
+/**
+* Convert a key to a buffer
+* #hexToBuffer
+* @param {string} hexString
+*/
+exports.hexToBuffer = function(hexString) {
+  var buf = new Buffer(constants.K)
+
+  buf.write(hexString, 0, 'hex');
+
+  return buf;
+}
+
+/**
+* Calculate the distance between two keys
+* #getDistance
+* @param {string} id1
+* @param {string} id2
+*/
+exports.getDistance = function(id1, id2) {
+  assert(exports.isValidKey(id1), 'Invalid key supplied');
+  assert(exports.isValidKey(id2), 'Invalid key supplied');
+
+  var distance = new Buffer(constants.K);
+  var id1Buf = exports.hexToBuffer(id1);
+  var id2Buf = exports.hexToBuffer(id2);
+
+  for(var i = 0; i < constants.K; ++i) {
+    distance[i] = id1Buf[i] ^ id2Buf[i];
+  }
+
+  return distance;
+};
+
+/**
+* Compare two buffers for sorting
+* #compareKeys
+* @param {buffer} b1
+* @param {buffer} b2
+*/
+exports.compareKeys = function(b1, b2) {
+  assert.equal(b1.length, b2.length);
+
+  for (var i = 0; i < b1.length; ++i) {
+    if (b1[i] !== b2[i]) {
+      if (b1[i] < b2[i]) {
+        return -1;
+      } else {
+        return 1;
+      }
+    }
+  }
+
+  return 0;
+};
+
+/**
+* Calculate the index of the bucket that key would belong to
+* #getBucketIndex
+* @param {string} id1
+* @param {string} id2
+*/
+exports.getBucketIndex = function(id1, id2) {
+  assert(exports.isValidKey(id1), 'Invalid key supplied');
+  assert(exports.isValidKey(id2), 'Invalid key supplied');
+
+  var distance = exports.getDistance(id1, id2);
+  var bucketNum = constants.B;
+
+  for (var i = 0; i < distance.length; i++) {
+    if (distance[i] === 0) {
+      bucketNum -= 8;
+      continue;
+    }
+
+    for (var j = 0; j < 8; j++) {
+      if (distance[i] & (0x80 >> j)) {
+        return --bucketNum;
+      } else {
+        bucketNum--;
+      }
+    }
+  }
+
+  return bucketNum;
+};
+
+/**
+* #getPowerOfTwoBuffer
+* @param {number} exp
+*/
+exports.getPowerOfTwoBuffer = function(exp) {
+  assert.ok(exp >= 0 && exp < constants.B);
+
+  var buffer = new Buffer(constants.K);
+  var byte = parseInt(exp / 8);
+
+  // we set the byte containing the bit to the right left shifted amount
+  buffer.fill(0);
+  buffer[constants.K - byte - 1] = 1 << (exp % 8);
+
+  return buffer;
+};
+
+/**
+* Assuming index corresponds to power of 2
+* (index = n has nodes within distance 2^n <= distance < 2^(n+1))
+* #getRandomInBucketRangeBuffer
+* @param {number} index
+*/
+exports.getRandomInBucketRangeBuffer = function(index) {
+  var base = exports.getPowerOfTwoBuffer(index);
+  var byte = parseInt(index / 8); // randomize bytes below the power of two
+
+  for (var i = constants.K - 1; i > (constants.K - byte - 1); i--) {
+    base[i] = parseInt(Math.random() * 256);
+  }
+
+  // also randomize the bits below the number in that byte
+  // and remember arrays are off by 1
+  for (var i = index - 1; i >= byte * 8; i--) {
+    var one = Math.random() >= 0.5;
+    var shiftAmount = i - byte * 8;
+
+    base[constants.K - byte - 1] |= one ? (1 << shiftAmount) : 0;
+  }
+
+  return base;
+};
+
+}).call(this,require("buffer").Buffer)
+},{"./constants":3,"assert":21,"buffer":23,"crypto":27}],19:[function(require,module,exports){
+(function (process){
+/*!
+ * async
+ * https://github.com/caolan/async
+ *
+ * Copyright 2010-2014 Caolan McMahon
+ * Released under the MIT license
+ */
+/*jshint onevar: false, indent:4 */
+/*global setImmediate: false, setTimeout: false, console: false */
+(function () {
+
+    var async = {};
+
+    // global on the server, window in the browser
+    var root, previous_async;
+
+    root = this;
+    if (root != null) {
+      previous_async = root.async;
+    }
+
+    async.noConflict = function () {
+        root.async = previous_async;
+        return async;
+    };
+
+    function only_once(fn) {
+        var called = false;
+        return function() {
+            if (called) throw new Error("Callback was already called.");
+            called = true;
+            fn.apply(root, arguments);
+        }
+    }
+
+    //// cross-browser compatiblity functions ////
+
+    var _toString = Object.prototype.toString;
+
+    var _isArray = Array.isArray || function (obj) {
+        return _toString.call(obj) === '[object Array]';
+    };
+
+    var _each = function (arr, iterator) {
+        for (var i = 0; i < arr.length; i += 1) {
+            iterator(arr[i], i, arr);
+        }
+    };
+
+    var _map = function (arr, iterator) {
+        if (arr.map) {
+            return arr.map(iterator);
+        }
+        var results = [];
+        _each(arr, function (x, i, a) {
+            results.push(iterator(x, i, a));
+        });
+        return results;
+    };
+
+    var _reduce = function (arr, iterator, memo) {
+        if (arr.reduce) {
+            return arr.reduce(iterator, memo);
+        }
+        _each(arr, function (x, i, a) {
+            memo = iterator(memo, x, i, a);
+        });
+        return memo;
+    };
+
+    var _keys = function (obj) {
+        if (Object.keys) {
+            return Object.keys(obj);
+        }
+        var keys = [];
+        for (var k in obj) {
+            if (obj.hasOwnProperty(k)) {
+                keys.push(k);
+            }
+        }
+        return keys;
+    };
+
+    //// exported async module functions ////
+
+    //// nextTick implementation with browser-compatible fallback ////
+    if (typeof process === 'undefined' || !(process.nextTick)) {
+        if (typeof setImmediate === 'function') {
+            async.nextTick = function (fn) {
+                // not a direct alias for IE10 compatibility
+                setImmediate(fn);
+            };
+            async.setImmediate = async.nextTick;
+        }
+        else {
+            async.nextTick = function (fn) {
+                setTimeout(fn, 0);
+            };
+            async.setImmediate = async.nextTick;
+        }
+    }
+    else {
+        async.nextTick = process.nextTick;
+        if (typeof setImmediate !== 'undefined') {
+            async.setImmediate = function (fn) {
+              // not a direct alias for IE10 compatibility
+              setImmediate(fn);
+            };
+        }
+        else {
+            async.setImmediate = async.nextTick;
+        }
+    }
+
+    async.each = function (arr, iterator, callback) {
+        callback = callback || function () {};
+        if (!arr.length) {
+            return callback();
+        }
+        var completed = 0;
+        _each(arr, function (x) {
+            iterator(x, only_once(done) );
+        });
+        function done(err) {
+          if (err) {
+              callback(err);
+              callback = function () {};
+          }
+          else {
+              completed += 1;
+              if (completed >= arr.length) {
+                  callback();
+              }
+          }
+        }
+    };
+    async.forEach = async.each;
+
+    async.eachSeries = function (arr, iterator, callback) {
+        callback = callback || function () {};
+        if (!arr.length) {
+            return callback();
+        }
+        var completed = 0;
+        var iterate = function () {
+            iterator(arr[completed], function (err) {
+                if (err) {
+                    callback(err);
+                    callback = function () {};
+                }
+                else {
+                    completed += 1;
+                    if (completed >= arr.length) {
+                        callback();
+                    }
+                    else {
+                        iterate();
+                    }
+                }
+            });
+        };
+        iterate();
+    };
+    async.forEachSeries = async.eachSeries;
+
+    async.eachLimit = function (arr, limit, iterator, callback) {
+        var fn = _eachLimit(limit);
+        fn.apply(null, [arr, iterator, callback]);
+    };
+    async.forEachLimit = async.eachLimit;
+
+    var _eachLimit = function (limit) {
+
+        return function (arr, iterator, callback) {
+            callback = callback || function () {};
+            if (!arr.length || limit <= 0) {
+                return callback();
+            }
+            var completed = 0;
+            var started = 0;
+            var running = 0;
+
+            (function replenish () {
+                if (completed >= arr.length) {
+                    return callback();
+                }
+
+                while (running < limit && started < arr.length) {
+                    started += 1;
+                    running += 1;
+                    iterator(arr[started - 1], function (err) {
+                        if (err) {
+                            callback(err);
+                            callback = function () {};
+                        }
+                        else {
+                            completed += 1;
+                            running -= 1;
+                            if (completed >= arr.length) {
+                                callback();
+                            }
+                            else {
+                                replenish();
+                            }
+                        }
+                    });
+                }
+            })();
+        };
+    };
+
+
+    var doParallel = function (fn) {
+        return function () {
+            var args = Array.prototype.slice.call(arguments);
+            return fn.apply(null, [async.each].concat(args));
+        };
+    };
+    var doParallelLimit = function(limit, fn) {
+        return function () {
+            var args = Array.prototype.slice.call(arguments);
+            return fn.apply(null, [_eachLimit(limit)].concat(args));
+        };
+    };
+    var doSeries = function (fn) {
+        return function () {
+            var args = Array.prototype.slice.call(arguments);
+            return fn.apply(null, [async.eachSeries].concat(args));
+        };
+    };
+
+
+    var _asyncMap = function (eachfn, arr, iterator, callback) {
+        arr = _map(arr, function (x, i) {
+            return {index: i, value: x};
+        });
+        if (!callback) {
+            eachfn(arr, function (x, callback) {
+                iterator(x.value, function (err) {
+                    callback(err);
+                });
+            });
+        } else {
+            var results = [];
+            eachfn(arr, function (x, callback) {
+                iterator(x.value, function (err, v) {
+                    results[x.index] = v;
+                    callback(err);
+                });
+            }, function (err) {
+                callback(err, results);
+            });
+        }
+    };
+    async.map = doParallel(_asyncMap);
+    async.mapSeries = doSeries(_asyncMap);
+    async.mapLimit = function (arr, limit, iterator, callback) {
+        return _mapLimit(limit)(arr, iterator, callback);
+    };
+
+    var _mapLimit = function(limit) {
+        return doParallelLimit(limit, _asyncMap);
+    };
+
+    // reduce only has a series version, as doing reduce in parallel won't
+    // work in many situations.
+    async.reduce = function (arr, memo, iterator, callback) {
+        async.eachSeries(arr, function (x, callback) {
+            iterator(memo, x, function (err, v) {
+                memo = v;
+                callback(err);
+            });
+        }, function (err) {
+            callback(err, memo);
+        });
+    };
+    // inject alias
+    async.inject = async.reduce;
+    // foldl alias
+    async.foldl = async.reduce;
+
+    async.reduceRight = function (arr, memo, iterator, callback) {
+        var reversed = _map(arr, function (x) {
+            return x;
+        }).reverse();
+        async.reduce(reversed, memo, iterator, callback);
+    };
+    // foldr alias
+    async.foldr = async.reduceRight;
+
+    var _filter = function (eachfn, arr, iterator, callback) {
+        var results = [];
+        arr = _map(arr, function (x, i) {
+            return {index: i, value: x};
+        });
+        eachfn(arr, function (x, callback) {
+            iterator(x.value, function (v) {
+                if (v) {
+                    results.push(x);
+                }
+                callback();
+            });
+        }, function (err) {
+            callback(_map(results.sort(function (a, b) {
+                return a.index - b.index;
+            }), function (x) {
+                return x.value;
+            }));
+        });
+    };
+    async.filter = doParallel(_filter);
+    async.filterSeries = doSeries(_filter);
+    // select alias
+    async.select = async.filter;
+    async.selectSeries = async.filterSeries;
+
+    var _reject = function (eachfn, arr, iterator, callback) {
+        var results = [];
+        arr = _map(arr, function (x, i) {
+            return {index: i, value: x};
+        });
+        eachfn(arr, function (x, callback) {
+            iterator(x.value, function (v) {
+                if (!v) {
+                    results.push(x);
+                }
+                callback();
+            });
+        }, function (err) {
+            callback(_map(results.sort(function (a, b) {
+                return a.index - b.index;
+            }), function (x) {
+                return x.value;
+            }));
+        });
+    };
+    async.reject = doParallel(_reject);
+    async.rejectSeries = doSeries(_reject);
+
+    var _detect = function (eachfn, arr, iterator, main_callback) {
+        eachfn(arr, function (x, callback) {
+            iterator(x, function (result) {
+                if (result) {
+                    main_callback(x);
+                    main_callback = function () {};
+                }
+                else {
+                    callback();
+                }
+            });
+        }, function (err) {
+            main_callback();
+        });
+    };
+    async.detect = doParallel(_detect);
+    async.detectSeries = doSeries(_detect);
+
+    async.some = function (arr, iterator, main_callback) {
+        async.each(arr, function (x, callback) {
+            iterator(x, function (v) {
+                if (v) {
+                    main_callback(true);
+                    main_callback = function () {};
+                }
+                callback();
+            });
+        }, function (err) {
+            main_callback(false);
+        });
+    };
+    // any alias
+    async.any = async.some;
+
+    async.every = function (arr, iterator, main_callback) {
+        async.each(arr, function (x, callback) {
+            iterator(x, function (v) {
+                if (!v) {
+                    main_callback(false);
+                    main_callback = function () {};
+                }
+                callback();
+            });
+        }, function (err) {
+            main_callback(true);
+        });
+    };
+    // all alias
+    async.all = async.every;
+
+    async.sortBy = function (arr, iterator, callback) {
+        async.map(arr, function (x, callback) {
+            iterator(x, function (err, criteria) {
+                if (err) {
+                    callback(err);
+                }
+                else {
+                    callback(null, {value: x, criteria: criteria});
+                }
+            });
+        }, function (err, results) {
+            if (err) {
+                return callback(err);
+            }
+            else {
+                var fn = function (left, right) {
+                    var a = left.criteria, b = right.criteria;
+                    return a < b ? -1 : a > b ? 1 : 0;
+                };
+                callback(null, _map(results.sort(fn), function (x) {
+                    return x.value;
+                }));
+            }
+        });
+    };
+
+    async.auto = function (tasks, callback) {
+        callback = callback || function () {};
+        var keys = _keys(tasks);
+        var remainingTasks = keys.length
+        if (!remainingTasks) {
+            return callback();
+        }
+
+        var results = {};
+
+        var listeners = [];
+        var addListener = function (fn) {
+            listeners.unshift(fn);
+        };
+        var removeListener = function (fn) {
+            for (var i = 0; i < listeners.length; i += 1) {
+                if (listeners[i] === fn) {
+                    listeners.splice(i, 1);
+                    return;
+                }
+            }
+        };
+        var taskComplete = function () {
+            remainingTasks--
+            _each(listeners.slice(0), function (fn) {
+                fn();
+            });
+        };
+
+        addListener(function () {
+            if (!remainingTasks) {
+                var theCallback = callback;
+                // prevent final callback from calling itself if it errors
+                callback = function () {};
+
+                theCallback(null, results);
+            }
+        });
+
+        _each(keys, function (k) {
+            var task = _isArray(tasks[k]) ? tasks[k]: [tasks[k]];
+            var taskCallback = function (err) {
+                var args = Array.prototype.slice.call(arguments, 1);
+                if (args.length <= 1) {
+                    args = args[0];
+                }
+                if (err) {
+                    var safeResults = {};
+                    _each(_keys(results), function(rkey) {
+                        safeResults[rkey] = results[rkey];
+                    });
+                    safeResults[k] = args;
+                    callback(err, safeResults);
+                    // stop subsequent errors hitting callback multiple times
+                    callback = function () {};
+                }
+                else {
+                    results[k] = args;
+                    async.setImmediate(taskComplete);
+                }
+            };
+            var requires = task.slice(0, Math.abs(task.length - 1)) || [];
+            var ready = function () {
+                return _reduce(requires, function (a, x) {
+                    return (a && results.hasOwnProperty(x));
+                }, true) && !results.hasOwnProperty(k);
+            };
+            if (ready()) {
+                task[task.length - 1](taskCallback, results);
+            }
+            else {
+                var listener = function () {
+                    if (ready()) {
+                        removeListener(listener);
+                        task[task.length - 1](taskCallback, results);
+                    }
+                };
+                addListener(listener);
+            }
+        });
+    };
+
+    async.retry = function(times, task, callback) {
+        var DEFAULT_TIMES = 5;
+        var attempts = [];
+        // Use defaults if times not passed
+        if (typeof times === 'function') {
+            callback = task;
+            task = times;
+            times = DEFAULT_TIMES;
+        }
+        // Make sure times is a number
+        times = parseInt(times, 10) || DEFAULT_TIMES;
+        var wrappedTask = function(wrappedCallback, wrappedResults) {
+            var retryAttempt = function(task, finalAttempt) {
+                return function(seriesCallback) {
+                    task(function(err, result){
+                        seriesCallback(!err || finalAttempt, {err: err, result: result});
+                    }, wrappedResults);
+                };
+            };
+            while (times) {
+                attempts.push(retryAttempt(task, !(times-=1)));
+            }
+            async.series(attempts, function(done, data){
+                data = data[data.length - 1];
+                (wrappedCallback || callback)(data.err, data.result);
+            });
+        }
+        // If a callback is passed, run this as a controll flow
+        return callback ? wrappedTask() : wrappedTask
+    };
+
+    async.waterfall = function (tasks, callback) {
+        callback = callback || function () {};
+        if (!_isArray(tasks)) {
+          var err = new Error('First argument to waterfall must be an array of functions');
+          return callback(err);
+        }
+        if (!tasks.length) {
+            return callback();
+        }
+        var wrapIterator = function (iterator) {
+            return function (err) {
+                if (err) {
+                    callback.apply(null, arguments);
+                    callback = function () {};
+                }
+                else {
+                    var args = Array.prototype.slice.call(arguments, 1);
+                    var next = iterator.next();
+                    if (next) {
+                        args.push(wrapIterator(next));
+                    }
+                    else {
+                        args.push(callback);
+                    }
+                    async.setImmediate(function () {
+                        iterator.apply(null, args);
+                    });
+                }
+            };
+        };
+        wrapIterator(async.iterator(tasks))();
+    };
+
+    var _parallel = function(eachfn, tasks, callback) {
+        callback = callback || function () {};
+        if (_isArray(tasks)) {
+            eachfn.map(tasks, function (fn, callback) {
+                if (fn) {
+                    fn(function (err) {
+                        var args = Array.prototype.slice.call(arguments, 1);
+                        if (args.length <= 1) {
+                            args = args[0];
+                        }
+                        callback.call(null, err, args);
+                    });
+                }
+            }, callback);
+        }
+        else {
+            var results = {};
+            eachfn.each(_keys(tasks), function (k, callback) {
+                tasks[k](function (err) {
+                    var args = Array.prototype.slice.call(arguments, 1);
+                    if (args.length <= 1) {
+                        args = args[0];
+                    }
+                    results[k] = args;
+                    callback(err);
+                });
+            }, function (err) {
+                callback(err, results);
+            });
+        }
+    };
+
+    async.parallel = function (tasks, callback) {
+        _parallel({ map: async.map, each: async.each }, tasks, callback);
+    };
+
+    async.parallelLimit = function(tasks, limit, callback) {
+        _parallel({ map: _mapLimit(limit), each: _eachLimit(limit) }, tasks, callback);
+    };
+
+    async.series = function (tasks, callback) {
+        callback = callback || function () {};
+        if (_isArray(tasks)) {
+            async.mapSeries(tasks, function (fn, callback) {
+                if (fn) {
+                    fn(function (err) {
+                        var args = Array.prototype.slice.call(arguments, 1);
+                        if (args.length <= 1) {
+                            args = args[0];
+                        }
+                        callback.call(null, err, args);
+                    });
+                }
+            }, callback);
+        }
+        else {
+            var results = {};
+            async.eachSeries(_keys(tasks), function (k, callback) {
+                tasks[k](function (err) {
+                    var args = Array.prototype.slice.call(arguments, 1);
+                    if (args.length <= 1) {
+                        args = args[0];
+                    }
+                    results[k] = args;
+                    callback(err);
+                });
+            }, function (err) {
+                callback(err, results);
+            });
+        }
+    };
+
+    async.iterator = function (tasks) {
+        var makeCallback = function (index) {
+            var fn = function () {
+                if (tasks.length) {
+                    tasks[index].apply(null, arguments);
+                }
+                return fn.next();
+            };
+            fn.next = function () {
+                return (index < tasks.length - 1) ? makeCallback(index + 1): null;
+            };
+            return fn;
+        };
+        return makeCallback(0);
+    };
+
+    async.apply = function (fn) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return function () {
+            return fn.apply(
+                null, args.concat(Array.prototype.slice.call(arguments))
+            );
+        };
+    };
+
+    var _concat = function (eachfn, arr, fn, callback) {
+        var r = [];
+        eachfn(arr, function (x, cb) {
+            fn(x, function (err, y) {
+                r = r.concat(y || []);
+                cb(err);
+            });
+        }, function (err) {
+            callback(err, r);
+        });
+    };
+    async.concat = doParallel(_concat);
+    async.concatSeries = doSeries(_concat);
+
+    async.whilst = function (test, iterator, callback) {
+        if (test()) {
+            iterator(function (err) {
+                if (err) {
+                    return callback(err);
+                }
+                async.whilst(test, iterator, callback);
+            });
+        }
+        else {
+            callback();
+        }
+    };
+
+    async.doWhilst = function (iterator, test, callback) {
+        iterator(function (err) {
+            if (err) {
+                return callback(err);
+            }
+            var args = Array.prototype.slice.call(arguments, 1);
+            if (test.apply(null, args)) {
+                async.doWhilst(iterator, test, callback);
+            }
+            else {
+                callback();
+            }
+        });
+    };
+
+    async.until = function (test, iterator, callback) {
+        if (!test()) {
+            iterator(function (err) {
+                if (err) {
+                    return callback(err);
+                }
+                async.until(test, iterator, callback);
+            });
+        }
+        else {
+            callback();
+        }
+    };
+
+    async.doUntil = function (iterator, test, callback) {
+        iterator(function (err) {
+            if (err) {
+                return callback(err);
+            }
+            var args = Array.prototype.slice.call(arguments, 1);
+            if (!test.apply(null, args)) {
+                async.doUntil(iterator, test, callback);
+            }
+            else {
+                callback();
+            }
+        });
+    };
+
+    async.queue = function (worker, concurrency) {
+        if (concurrency === undefined) {
+            concurrency = 1;
+        }
+        function _insert(q, data, pos, callback) {
+          if (!q.started){
+            q.started = true;
+          }
+          if (!_isArray(data)) {
+              data = [data];
+          }
+          if(data.length == 0) {
+             // call drain immediately if there are no tasks
+             return async.setImmediate(function() {
+                 if (q.drain) {
+                     q.drain();
+                 }
+             });
+          }
+          _each(data, function(task) {
+              var item = {
+                  data: task,
+                  callback: typeof callback === 'function' ? callback : null
+              };
+
+              if (pos) {
+                q.tasks.unshift(item);
+              } else {
+                q.tasks.push(item);
+              }
+
+              if (q.saturated && q.tasks.length === q.concurrency) {
+                  q.saturated();
+              }
+              async.setImmediate(q.process);
+          });
+        }
+
+        var workers = 0;
+        var q = {
+            tasks: [],
+            concurrency: concurrency,
+            saturated: null,
+            empty: null,
+            drain: null,
+            started: false,
+            paused: false,
+            push: function (data, callback) {
+              _insert(q, data, false, callback);
+            },
+            kill: function () {
+              q.drain = null;
+              q.tasks = [];
+            },
+            unshift: function (data, callback) {
+              _insert(q, data, true, callback);
+            },
+            process: function () {
+                if (!q.paused && workers < q.concurrency && q.tasks.length) {
+                    var task = q.tasks.shift();
+                    if (q.empty && q.tasks.length === 0) {
+                        q.empty();
+                    }
+                    workers += 1;
+                    var next = function () {
+                        workers -= 1;
+                        if (task.callback) {
+                            task.callback.apply(task, arguments);
+                        }
+                        if (q.drain && q.tasks.length + workers === 0) {
+                            q.drain();
+                        }
+                        q.process();
+                    };
+                    var cb = only_once(next);
+                    worker(task.data, cb);
+                }
+            },
+            length: function () {
+                return q.tasks.length;
+            },
+            running: function () {
+                return workers;
+            },
+            idle: function() {
+                return q.tasks.length + workers === 0;
+            },
+            pause: function () {
+                if (q.paused === true) { return; }
+                q.paused = true;
+            },
+            resume: function () {
+                if (q.paused === false) { return; }
+                q.paused = false;
+                // Need to call q.process once per concurrent
+                // worker to preserve full concurrency after pause
+                for (var w = 1; w <= q.concurrency; w++) {
+                    async.setImmediate(q.process);
+                }
+            }
+        };
+        return q;
+    };
+
+    async.priorityQueue = function (worker, concurrency) {
+
+        function _compareTasks(a, b){
+          return a.priority - b.priority;
+        };
+
+        function _binarySearch(sequence, item, compare) {
+          var beg = -1,
+              end = sequence.length - 1;
+          while (beg < end) {
+            var mid = beg + ((end - beg + 1) >>> 1);
+            if (compare(item, sequence[mid]) >= 0) {
+              beg = mid;
+            } else {
+              end = mid - 1;
+            }
+          }
+          return beg;
+        }
+
+        function _insert(q, data, priority, callback) {
+          if (!q.started){
+            q.started = true;
+          }
+          if (!_isArray(data)) {
+              data = [data];
+          }
+          if(data.length == 0) {
+             // call drain immediately if there are no tasks
+             return async.setImmediate(function() {
+                 if (q.drain) {
+                     q.drain();
+                 }
+             });
+          }
+          _each(data, function(task) {
+              var item = {
+                  data: task,
+                  priority: priority,
+                  callback: typeof callback === 'function' ? callback : null
+              };
+
+              q.tasks.splice(_binarySearch(q.tasks, item, _compareTasks) + 1, 0, item);
+
+              if (q.saturated && q.tasks.length === q.concurrency) {
+                  q.saturated();
+              }
+              async.setImmediate(q.process);
+          });
+        }
+
+        // Start with a normal queue
+        var q = async.queue(worker, concurrency);
+
+        // Override push to accept second parameter representing priority
+        q.push = function (data, priority, callback) {
+          _insert(q, data, priority, callback);
+        };
+
+        // Remove unshift function
+        delete q.unshift;
+
+        return q;
+    };
+
+    async.cargo = function (worker, payload) {
+        var working     = false,
+            tasks       = [];
+
+        var cargo = {
+            tasks: tasks,
+            payload: payload,
+            saturated: null,
+            empty: null,
+            drain: null,
+            drained: true,
+            push: function (data, callback) {
+                if (!_isArray(data)) {
+                    data = [data];
+                }
+                _each(data, function(task) {
+                    tasks.push({
+                        data: task,
+                        callback: typeof callback === 'function' ? callback : null
+                    });
+                    cargo.drained = false;
+                    if (cargo.saturated && tasks.length === payload) {
+                        cargo.saturated();
+                    }
+                });
+                async.setImmediate(cargo.process);
+            },
+            process: function process() {
+                if (working) return;
+                if (tasks.length === 0) {
+                    if(cargo.drain && !cargo.drained) cargo.drain();
+                    cargo.drained = true;
+                    return;
+                }
+
+                var ts = typeof payload === 'number'
+                            ? tasks.splice(0, payload)
+                            : tasks.splice(0, tasks.length);
+
+                var ds = _map(ts, function (task) {
+                    return task.data;
+                });
+
+                if(cargo.empty) cargo.empty();
+                working = true;
+                worker(ds, function () {
+                    working = false;
+
+                    var args = arguments;
+                    _each(ts, function (data) {
+                        if (data.callback) {
+                            data.callback.apply(null, args);
+                        }
+                    });
+
+                    process();
+                });
+            },
+            length: function () {
+                return tasks.length;
+            },
+            running: function () {
+                return working;
+            }
+        };
+        return cargo;
+    };
+
+    var _console_fn = function (name) {
+        return function (fn) {
+            var args = Array.prototype.slice.call(arguments, 1);
+            fn.apply(null, args.concat([function (err) {
+                var args = Array.prototype.slice.call(arguments, 1);
+                if (typeof console !== 'undefined') {
+                    if (err) {
+                        if (console.error) {
+                            console.error(err);
+                        }
+                    }
+                    else if (console[name]) {
+                        _each(args, function (x) {
+                            console[name](x);
+                        });
+                    }
+                }
+            }]));
+        };
+    };
+    async.log = _console_fn('log');
+    async.dir = _console_fn('dir');
+    /*async.info = _console_fn('info');
+    async.warn = _console_fn('warn');
+    async.error = _console_fn('error');*/
+
+    async.memoize = function (fn, hasher) {
+        var memo = {};
+        var queues = {};
+        hasher = hasher || function (x) {
+            return x;
+        };
+        var memoized = function () {
+            var args = Array.prototype.slice.call(arguments);
+            var callback = args.pop();
+            var key = hasher.apply(null, args);
+            if (key in memo) {
+                async.nextTick(function () {
+                    callback.apply(null, memo[key]);
+                });
+            }
+            else if (key in queues) {
+                queues[key].push(callback);
+            }
+            else {
+                queues[key] = [callback];
+                fn.apply(null, args.concat([function () {
+                    memo[key] = arguments;
+                    var q = queues[key];
+                    delete queues[key];
+                    for (var i = 0, l = q.length; i < l; i++) {
+                      q[i].apply(null, arguments);
+                    }
+                }]));
+            }
+        };
+        memoized.memo = memo;
+        memoized.unmemoized = fn;
+        return memoized;
+    };
+
+    async.unmemoize = function (fn) {
+      return function () {
+        return (fn.unmemoized || fn).apply(null, arguments);
+      };
+    };
+
+    async.times = function (count, iterator, callback) {
+        var counter = [];
+        for (var i = 0; i < count; i++) {
+            counter.push(i);
+        }
+        return async.map(counter, iterator, callback);
+    };
+
+    async.timesSeries = function (count, iterator, callback) {
+        var counter = [];
+        for (var i = 0; i < count; i++) {
+            counter.push(i);
+        }
+        return async.mapSeries(counter, iterator, callback);
+    };
+
+    async.seq = function (/* functions... */) {
+        var fns = arguments;
+        return function () {
+            var that = this;
+            var args = Array.prototype.slice.call(arguments);
+            var callback = args.pop();
+            async.reduce(fns, args, function (newargs, fn, cb) {
+                fn.apply(that, newargs.concat([function () {
+                    var err = arguments[0];
+                    var nextargs = Array.prototype.slice.call(arguments, 1);
+                    cb(err, nextargs);
+                }]))
+            },
+            function (err, results) {
+                callback.apply(that, [err].concat(results));
+            });
+        };
+    };
+
+    async.compose = function (/* functions... */) {
+      return async.seq.apply(null, Array.prototype.reverse.call(arguments));
+    };
+
+    var _applyEach = function (eachfn, fns /*args...*/) {
+        var go = function () {
+            var that = this;
+            var args = Array.prototype.slice.call(arguments);
+            var callback = args.pop();
+            return eachfn(fns, function (fn, cb) {
+                fn.apply(that, args.concat([cb]));
+            },
+            callback);
+        };
+        if (arguments.length > 2) {
+            var args = Array.prototype.slice.call(arguments, 2);
+            return go.apply(this, args);
+        }
+        else {
+            return go;
+        }
+    };
+    async.applyEach = doParallel(_applyEach);
+    async.applyEachSeries = doSeries(_applyEach);
+
+    async.forever = function (fn, callback) {
+        function next(err) {
+            if (err) {
+                if (callback) {
+                    return callback(err);
+                }
+                throw err;
+            }
+            fn(next);
+        }
+        next();
+    };
+
+    // Node.js
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = async;
+    }
+    // AMD / RequireJS
+    else if (typeof define !== 'undefined' && define.amd) {
+        define([], function () {
+            return async;
+        });
+    }
+    // included directly via <script> tag
+    else {
+        root.async = async;
+    }
+
+}());
+
+}).call(this,require('_process'))
+},{"_process":223}],20:[function(require,module,exports){
+
+},{}],21:[function(require,module,exports){
 // http://wiki.commonjs.org/wiki/Unit_Testing/1.0
 //
 // THIS IS NOT TESTED NOR LIKELY TO WORK OUTSIDE V8!
@@ -361,9 +3687,9 @@ var objectKeys = Object.keys || function (obj) {
   return keys;
 };
 
-},{"util/":232}],3:[function(require,module,exports){
-arguments[4][1][0].apply(exports,arguments)
-},{"dup":1}],4:[function(require,module,exports){
+},{"util/":254}],22:[function(require,module,exports){
+arguments[4][20][0].apply(exports,arguments)
+},{"dup":20}],23:[function(require,module,exports){
 (function (global){
 /*!
  * The buffer module from node.js, for the browser.
@@ -1911,7 +5237,7 @@ function blitBuffer (src, dst, offset, length) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"base64-js":5,"ieee754":6,"is-array":7}],5:[function(require,module,exports){
+},{"base64-js":24,"ieee754":25,"is-array":26}],24:[function(require,module,exports){
 var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 ;(function (exports) {
@@ -2037,7 +5363,7 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 	exports.fromByteArray = uint8ToBase64
 }(typeof exports === 'undefined' ? (this.base64js = {}) : exports))
 
-},{}],6:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
   var eLen = nBytes * 8 - mLen - 1
@@ -2123,7 +5449,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],7:[function(require,module,exports){
+},{}],26:[function(require,module,exports){
 
 /**
  * isArray
@@ -2158,7 +5484,7 @@ module.exports = isArray || function (val) {
   return !! val && '[object Array]' == str.call(val);
 };
 
-},{}],8:[function(require,module,exports){
+},{}],27:[function(require,module,exports){
 'use strict'
 
 exports.randomBytes = exports.rng = exports.pseudoRandomBytes = exports.prng = require('randombytes')
@@ -2237,7 +5563,7 @@ var publicEncrypt = require('public-encrypt')
   }
 })
 
-},{"browserify-cipher":9,"browserify-sign":39,"browserify-sign/algos":38,"create-ecdh":106,"create-hash":132,"create-hmac":145,"diffie-hellman":146,"pbkdf2":153,"public-encrypt":154,"randombytes":199}],9:[function(require,module,exports){
+},{"browserify-cipher":28,"browserify-sign":58,"browserify-sign/algos":57,"create-ecdh":125,"create-hash":151,"create-hmac":164,"diffie-hellman":165,"pbkdf2":172,"public-encrypt":173,"randombytes":218}],28:[function(require,module,exports){
 var ebtk = require('evp_bytestokey')
 var aes = require('browserify-aes/browser')
 var DES = require('browserify-des')
@@ -2312,7 +5638,7 @@ function getCiphers () {
 }
 exports.listCiphers = exports.getCiphers = getCiphers
 
-},{"browserify-aes/browser":12,"browserify-aes/modes":16,"browserify-des":27,"browserify-des/modes":28,"evp_bytestokey":37}],10:[function(require,module,exports){
+},{"browserify-aes/browser":31,"browserify-aes/modes":35,"browserify-des":46,"browserify-des/modes":47,"evp_bytestokey":56}],29:[function(require,module,exports){
 (function (Buffer){
 // based on the aes implimentation in triple sec
 // https://github.com/keybase/triplesec
@@ -2493,7 +5819,7 @@ AES.prototype._doCryptBlock = function (M, keySchedule, SUB_MIX, SBOX) {
 exports.AES = AES
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4}],11:[function(require,module,exports){
+},{"buffer":23}],30:[function(require,module,exports){
 (function (Buffer){
 var aes = require('./aes')
 var Transform = require('cipher-base')
@@ -2594,7 +5920,7 @@ function xorTest (a, b) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./aes":10,"./ghash":15,"buffer":4,"buffer-xor":24,"cipher-base":25,"inherits":201}],12:[function(require,module,exports){
+},{"./aes":29,"./ghash":34,"buffer":23,"buffer-xor":43,"cipher-base":44,"inherits":220}],31:[function(require,module,exports){
 var ciphers = require('./encrypter')
 exports.createCipher = exports.Cipher = ciphers.createCipher
 exports.createCipheriv = exports.Cipheriv = ciphers.createCipheriv
@@ -2607,7 +5933,7 @@ function getCiphers () {
 }
 exports.listCiphers = exports.getCiphers = getCiphers
 
-},{"./decrypter":13,"./encrypter":14,"./modes":16}],13:[function(require,module,exports){
+},{"./decrypter":32,"./encrypter":33,"./modes":35}],32:[function(require,module,exports){
 (function (Buffer){
 var aes = require('./aes')
 var Transform = require('cipher-base')
@@ -2747,7 +6073,7 @@ exports.createDecipher = createDecipher
 exports.createDecipheriv = createDecipheriv
 
 }).call(this,require("buffer").Buffer)
-},{"./aes":10,"./authCipher":11,"./modes":16,"./modes/cbc":17,"./modes/cfb":18,"./modes/cfb1":19,"./modes/cfb8":20,"./modes/ctr":21,"./modes/ecb":22,"./modes/ofb":23,"./streamCipher":26,"buffer":4,"cipher-base":25,"evp_bytestokey":37,"inherits":201}],14:[function(require,module,exports){
+},{"./aes":29,"./authCipher":30,"./modes":35,"./modes/cbc":36,"./modes/cfb":37,"./modes/cfb1":38,"./modes/cfb8":39,"./modes/ctr":40,"./modes/ecb":41,"./modes/ofb":42,"./streamCipher":45,"buffer":23,"cipher-base":44,"evp_bytestokey":56,"inherits":220}],33:[function(require,module,exports){
 (function (Buffer){
 var aes = require('./aes')
 var Transform = require('cipher-base')
@@ -2872,7 +6198,7 @@ exports.createCipheriv = createCipheriv
 exports.createCipher = createCipher
 
 }).call(this,require("buffer").Buffer)
-},{"./aes":10,"./authCipher":11,"./modes":16,"./modes/cbc":17,"./modes/cfb":18,"./modes/cfb1":19,"./modes/cfb8":20,"./modes/ctr":21,"./modes/ecb":22,"./modes/ofb":23,"./streamCipher":26,"buffer":4,"cipher-base":25,"evp_bytestokey":37,"inherits":201}],15:[function(require,module,exports){
+},{"./aes":29,"./authCipher":30,"./modes":35,"./modes/cbc":36,"./modes/cfb":37,"./modes/cfb1":38,"./modes/cfb8":39,"./modes/ctr":40,"./modes/ecb":41,"./modes/ofb":42,"./streamCipher":45,"buffer":23,"cipher-base":44,"evp_bytestokey":56,"inherits":220}],34:[function(require,module,exports){
 (function (Buffer){
 var zeros = new Buffer(16)
 zeros.fill(0)
@@ -2974,7 +6300,7 @@ function xor (a, b) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4}],16:[function(require,module,exports){
+},{"buffer":23}],35:[function(require,module,exports){
 exports['aes-128-ecb'] = {
   cipher: 'AES',
   key: 128,
@@ -3147,7 +6473,7 @@ exports['aes-256-gcm'] = {
   type: 'auth'
 }
 
-},{}],17:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 var xor = require('buffer-xor')
 
 exports.encrypt = function (self, block) {
@@ -3166,7 +6492,7 @@ exports.decrypt = function (self, block) {
   return xor(out, pad)
 }
 
-},{"buffer-xor":24}],18:[function(require,module,exports){
+},{"buffer-xor":43}],37:[function(require,module,exports){
 (function (Buffer){
 var xor = require('buffer-xor')
 
@@ -3201,7 +6527,7 @@ function encryptStart (self, data, decrypt) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"buffer-xor":24}],19:[function(require,module,exports){
+},{"buffer":23,"buffer-xor":43}],38:[function(require,module,exports){
 (function (Buffer){
 function encryptByte (self, byteParam, decrypt) {
   var pad
@@ -3239,7 +6565,7 @@ function shiftIn (buffer, value) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4}],20:[function(require,module,exports){
+},{"buffer":23}],39:[function(require,module,exports){
 (function (Buffer){
 function encryptByte (self, byteParam, decrypt) {
   var pad = self._cipher.encryptBlock(self._prev)
@@ -3258,7 +6584,7 @@ exports.encrypt = function (self, chunk, decrypt) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4}],21:[function(require,module,exports){
+},{"buffer":23}],40:[function(require,module,exports){
 (function (Buffer){
 var xor = require('buffer-xor')
 
@@ -3293,7 +6619,7 @@ exports.encrypt = function (self, chunk) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"buffer-xor":24}],22:[function(require,module,exports){
+},{"buffer":23,"buffer-xor":43}],41:[function(require,module,exports){
 exports.encrypt = function (self, block) {
   return self._cipher.encryptBlock(block)
 }
@@ -3301,7 +6627,7 @@ exports.decrypt = function (self, block) {
   return self._cipher.decryptBlock(block)
 }
 
-},{}],23:[function(require,module,exports){
+},{}],42:[function(require,module,exports){
 (function (Buffer){
 var xor = require('buffer-xor')
 
@@ -3321,7 +6647,7 @@ exports.encrypt = function (self, chunk) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"buffer-xor":24}],24:[function(require,module,exports){
+},{"buffer":23,"buffer-xor":43}],43:[function(require,module,exports){
 (function (Buffer){
 module.exports = function xor (a, b) {
   var length = Math.min(a.length, b.length)
@@ -3335,7 +6661,7 @@ module.exports = function xor (a, b) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4}],25:[function(require,module,exports){
+},{"buffer":23}],44:[function(require,module,exports){
 (function (Buffer){
 var Transform = require('stream').Transform
 var inherits = require('inherits')
@@ -3429,7 +6755,7 @@ CipherBase.prototype._toString = function (value, enc, final) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"inherits":201,"stream":222,"string_decoder":228}],26:[function(require,module,exports){
+},{"buffer":23,"inherits":220,"stream":241,"string_decoder":251}],45:[function(require,module,exports){
 (function (Buffer){
 var aes = require('./aes')
 var Transform = require('cipher-base')
@@ -3458,7 +6784,7 @@ StreamCipher.prototype._final = function () {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./aes":10,"buffer":4,"cipher-base":25,"inherits":201}],27:[function(require,module,exports){
+},{"./aes":29,"buffer":23,"cipher-base":44,"inherits":220}],46:[function(require,module,exports){
 (function (Buffer){
 var CipherBase = require('cipher-base')
 var des = require('des.js')
@@ -3505,7 +6831,7 @@ DES.prototype._final = function () {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"cipher-base":29,"des.js":30,"inherits":201}],28:[function(require,module,exports){
+},{"buffer":23,"cipher-base":48,"des.js":49,"inherits":220}],47:[function(require,module,exports){
 exports['des-ecb'] = {
   key: 8,
   iv: 0
@@ -3531,9 +6857,9 @@ exports['des-ede'] = {
   iv: 0
 }
 
-},{}],29:[function(require,module,exports){
-arguments[4][25][0].apply(exports,arguments)
-},{"buffer":4,"dup":25,"inherits":201,"stream":222,"string_decoder":228}],30:[function(require,module,exports){
+},{}],48:[function(require,module,exports){
+arguments[4][44][0].apply(exports,arguments)
+},{"buffer":23,"dup":44,"inherits":220,"stream":241,"string_decoder":251}],49:[function(require,module,exports){
 'use strict';
 
 exports.utils = require('./des/utils');
@@ -3542,7 +6868,7 @@ exports.DES = require('./des/des');
 exports.CBC = require('./des/cbc');
 exports.EDE = require('./des/ede');
 
-},{"./des/cbc":31,"./des/cipher":32,"./des/des":33,"./des/ede":34,"./des/utils":35}],31:[function(require,module,exports){
+},{"./des/cbc":50,"./des/cipher":51,"./des/des":52,"./des/ede":53,"./des/utils":54}],50:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -3609,7 +6935,7 @@ proto._update = function _update(inp, inOff, out, outOff) {
   }
 };
 
-},{"inherits":201,"minimalistic-assert":36}],32:[function(require,module,exports){
+},{"inherits":220,"minimalistic-assert":55}],51:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -3752,7 +7078,7 @@ Cipher.prototype._finalDecrypt = function _finalDecrypt() {
   return this._unpad(out);
 };
 
-},{"minimalistic-assert":36}],33:[function(require,module,exports){
+},{"minimalistic-assert":55}],52:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -3897,7 +7223,7 @@ DES.prototype._decrypt = function _decrypt(state, lStart, rStart, out, off) {
   utils.rip(l, r, out, off);
 };
 
-},{"../des":30,"inherits":201,"minimalistic-assert":36}],34:[function(require,module,exports){
+},{"../des":49,"inherits":220,"minimalistic-assert":55}],53:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -3954,7 +7280,7 @@ EDE.prototype._update = function _update(inp, inOff, out, outOff) {
 EDE.prototype._pad = DES.prototype._pad;
 EDE.prototype._unpad = DES.prototype._unpad;
 
-},{"../des":30,"inherits":201,"minimalistic-assert":36}],35:[function(require,module,exports){
+},{"../des":49,"inherits":220,"minimalistic-assert":55}],54:[function(require,module,exports){
 'use strict';
 
 exports.readUInt32BE = function readUInt32BE(bytes, off) {
@@ -4212,7 +7538,7 @@ exports.padSplit = function padSplit(num, size, group) {
   return out.join(' ');
 };
 
-},{}],36:[function(require,module,exports){
+},{}],55:[function(require,module,exports){
 module.exports = assert;
 
 function assert(val, msg) {
@@ -4225,7 +7551,7 @@ assert.equal = function assertEqual(l, r, msg) {
     throw new Error(msg || ('Assertion failed: ' + l + ' != ' + r));
 };
 
-},{}],37:[function(require,module,exports){
+},{}],56:[function(require,module,exports){
 (function (Buffer){
 var md5 = require('create-hash/md5')
 module.exports = EVP_BytesToKey
@@ -4297,7 +7623,7 @@ function EVP_BytesToKey (password, salt, keyLen, ivLen) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"create-hash/md5":134}],38:[function(require,module,exports){
+},{"buffer":23,"create-hash/md5":153}],57:[function(require,module,exports){
 (function (Buffer){
 'use strict'
 exports['RSA-SHA224'] = exports.sha224WithRSAEncryption = {
@@ -4373,7 +7699,7 @@ exports['RSA-MD5'] = exports.md5WithRSAEncryption = {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4}],39:[function(require,module,exports){
+},{"buffer":23}],58:[function(require,module,exports){
 (function (Buffer){
 var _algos = require('./algos')
 var createHash = require('create-hash')
@@ -4480,7 +7806,7 @@ module.exports = {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./algos":38,"./sign":104,"./verify":105,"buffer":4,"create-hash":132,"inherits":201,"stream":222}],40:[function(require,module,exports){
+},{"./algos":57,"./sign":123,"./verify":124,"buffer":23,"create-hash":151,"inherits":220,"stream":241}],59:[function(require,module,exports){
 'use strict'
 exports['1.3.132.0.10'] = 'secp256k1'
 
@@ -4494,7 +7820,7 @@ exports['1.3.132.0.34'] = 'p384'
 
 exports['1.3.132.0.35'] = 'p521'
 
-},{}],41:[function(require,module,exports){
+},{}],60:[function(require,module,exports){
 (function (module, exports) {
 
 'use strict';
@@ -6982,7 +10308,7 @@ Mont.prototype.invm = function invm(a) {
 
 })(typeof module === 'undefined' || module, this);
 
-},{}],42:[function(require,module,exports){
+},{}],61:[function(require,module,exports){
 (function (Buffer){
 var bn = require('bn.js');
 var randomBytes = require('randombytes');
@@ -7026,7 +10352,7 @@ function getr(priv) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"bn.js":41,"buffer":4,"randombytes":199}],43:[function(require,module,exports){
+},{"bn.js":60,"buffer":23,"randombytes":218}],62:[function(require,module,exports){
 'use strict';
 
 var elliptic = exports;
@@ -7042,7 +10368,7 @@ elliptic.curves = require('./elliptic/curves');
 elliptic.ec = require('./elliptic/ec');
 elliptic.eddsa = require('./elliptic/eddsa');
 
-},{"../package.json":66,"./elliptic/curve":46,"./elliptic/curves":49,"./elliptic/ec":50,"./elliptic/eddsa":53,"./elliptic/hmac-drbg":56,"./elliptic/utils":58,"brorand":59}],44:[function(require,module,exports){
+},{"../package.json":85,"./elliptic/curve":65,"./elliptic/curves":68,"./elliptic/ec":69,"./elliptic/eddsa":72,"./elliptic/hmac-drbg":75,"./elliptic/utils":77,"brorand":78}],63:[function(require,module,exports){
 'use strict';
 
 var bn = require('bn.js');
@@ -7395,7 +10721,7 @@ BasePoint.prototype.dblp = function dblp(k) {
   return r;
 };
 
-},{"../../elliptic":43,"bn.js":41}],45:[function(require,module,exports){
+},{"../../elliptic":62,"bn.js":60}],64:[function(require,module,exports){
 'use strict';
 
 var curve = require('../curve');
@@ -7803,7 +11129,7 @@ Point.prototype.eq = function eq(other) {
 Point.prototype.toP = Point.prototype.normalize;
 Point.prototype.mixedAdd = Point.prototype.add;
 
-},{"../../elliptic":43,"../curve":46,"bn.js":41,"inherits":201}],46:[function(require,module,exports){
+},{"../../elliptic":62,"../curve":65,"bn.js":60,"inherits":220}],65:[function(require,module,exports){
 'use strict';
 
 var curve = exports;
@@ -7813,7 +11139,7 @@ curve.short = require('./short');
 curve.mont = require('./mont');
 curve.edwards = require('./edwards');
 
-},{"./base":44,"./edwards":45,"./mont":47,"./short":48}],47:[function(require,module,exports){
+},{"./base":63,"./edwards":64,"./mont":66,"./short":67}],66:[function(require,module,exports){
 'use strict';
 
 var curve = require('../curve');
@@ -7991,7 +11317,7 @@ Point.prototype.getX = function getX() {
   return this.x.fromRed();
 };
 
-},{"../../elliptic":43,"../curve":46,"bn.js":41,"inherits":201}],48:[function(require,module,exports){
+},{"../../elliptic":62,"../curve":65,"bn.js":60,"inherits":220}],67:[function(require,module,exports){
 'use strict';
 
 var curve = require('../curve');
@@ -8900,7 +12226,7 @@ JPoint.prototype.isInfinity = function isInfinity() {
   return this.z.cmpn(0) === 0;
 };
 
-},{"../../elliptic":43,"../curve":46,"bn.js":41,"inherits":201}],49:[function(require,module,exports){
+},{"../../elliptic":62,"../curve":65,"bn.js":60,"inherits":220}],68:[function(require,module,exports){
 'use strict';
 
 var curves = exports;
@@ -9107,7 +12433,7 @@ defineCurve('secp256k1', {
   ]
 });
 
-},{"../elliptic":43,"./precomputed/secp256k1":57,"hash.js":60}],50:[function(require,module,exports){
+},{"../elliptic":62,"./precomputed/secp256k1":76,"hash.js":79}],69:[function(require,module,exports){
 'use strict';
 
 var bn = require('bn.js');
@@ -9325,7 +12651,7 @@ EC.prototype.getKeyRecoveryParam = function(e, signature, Q, enc) {
   throw new Error('Unable to find valid recovery factor');
 };
 
-},{"../../elliptic":43,"./key":51,"./signature":52,"bn.js":41}],51:[function(require,module,exports){
+},{"../../elliptic":62,"./key":70,"./signature":71,"bn.js":60}],70:[function(require,module,exports){
 'use strict';
 
 var bn = require('bn.js');
@@ -9434,7 +12760,7 @@ KeyPair.prototype.inspect = function inspect() {
          ' pub: ' + (this.pub && this.pub.inspect()) + ' >';
 };
 
-},{"bn.js":41}],52:[function(require,module,exports){
+},{"bn.js":60}],71:[function(require,module,exports){
 'use strict';
 
 var bn = require('bn.js');
@@ -9571,7 +12897,7 @@ Signature.prototype.toDER = function toDER(enc) {
   return utils.encode(res, enc);
 };
 
-},{"../../elliptic":43,"bn.js":41}],53:[function(require,module,exports){
+},{"../../elliptic":62,"bn.js":60}],72:[function(require,module,exports){
 'use strict';
 
 var hash = require('hash.js');
@@ -9691,7 +13017,7 @@ EDDSA.prototype.isPoint = function isPoint(val) {
   return val instanceof this.pointClass;
 };
 
-},{"../../elliptic":43,"./key":54,"./signature":55,"hash.js":60}],54:[function(require,module,exports){
+},{"../../elliptic":62,"./key":73,"./signature":74,"hash.js":79}],73:[function(require,module,exports){
 'use strict';
 
 var elliptic = require('../../elliptic');
@@ -9789,7 +13115,7 @@ KeyPair.prototype.getPublic = function getPublic(enc) {
 
 module.exports = KeyPair;
 
-},{"../../elliptic":43}],55:[function(require,module,exports){
+},{"../../elliptic":62}],74:[function(require,module,exports){
 'use strict';
 
 var bn = require('bn.js');
@@ -9857,7 +13183,7 @@ Signature.prototype.toHex = function toHex() {
 
 module.exports = Signature;
 
-},{"../../elliptic":43,"bn.js":41}],56:[function(require,module,exports){
+},{"../../elliptic":62,"bn.js":60}],75:[function(require,module,exports){
 'use strict';
 
 var hash = require('hash.js');
@@ -9973,7 +13299,7 @@ HmacDRBG.prototype.generate = function generate(len, enc, add, addEnc) {
   return utils.encode(res, enc);
 };
 
-},{"../elliptic":43,"hash.js":60}],57:[function(require,module,exports){
+},{"../elliptic":62,"hash.js":79}],76:[function(require,module,exports){
 module.exports = {
   doubles: {
     step: 4,
@@ -10755,7 +14081,7 @@ module.exports = {
   }
 };
 
-},{}],58:[function(require,module,exports){
+},{}],77:[function(require,module,exports){
 'use strict';
 
 var utils = exports;
@@ -10930,7 +14256,7 @@ function intFromLE(bytes) {
 utils.intFromLE = intFromLE;
 
 
-},{"bn.js":41}],59:[function(require,module,exports){
+},{"bn.js":60}],78:[function(require,module,exports){
 var r;
 
 module.exports = function rand(len) {
@@ -10989,7 +14315,7 @@ if (typeof window === 'object') {
   }
 }
 
-},{}],60:[function(require,module,exports){
+},{}],79:[function(require,module,exports){
 var hash = exports;
 
 hash.utils = require('./hash/utils');
@@ -11006,7 +14332,7 @@ hash.sha384 = hash.sha.sha384;
 hash.sha512 = hash.sha.sha512;
 hash.ripemd160 = hash.ripemd.ripemd160;
 
-},{"./hash/common":61,"./hash/hmac":62,"./hash/ripemd":63,"./hash/sha":64,"./hash/utils":65}],61:[function(require,module,exports){
+},{"./hash/common":80,"./hash/hmac":81,"./hash/ripemd":82,"./hash/sha":83,"./hash/utils":84}],80:[function(require,module,exports){
 var hash = require('../hash');
 var utils = hash.utils;
 var assert = utils.assert;
@@ -11099,7 +14425,7 @@ BlockHash.prototype._pad = function pad() {
   return res;
 };
 
-},{"../hash":60}],62:[function(require,module,exports){
+},{"../hash":79}],81:[function(require,module,exports){
 var hmac = exports;
 
 var hash = require('../hash');
@@ -11149,7 +14475,7 @@ Hmac.prototype.digest = function digest(enc) {
   return this.outer.digest(enc);
 };
 
-},{"../hash":60}],63:[function(require,module,exports){
+},{"../hash":79}],82:[function(require,module,exports){
 var hash = require('../hash');
 var utils = hash.utils;
 
@@ -11295,7 +14621,7 @@ var sh = [
   8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
 ];
 
-},{"../hash":60}],64:[function(require,module,exports){
+},{"../hash":79}],83:[function(require,module,exports){
 var hash = require('../hash');
 var utils = hash.utils;
 var assert = utils.assert;
@@ -11861,7 +15187,7 @@ function g1_512_lo(xh, xl) {
   return r;
 }
 
-},{"../hash":60}],65:[function(require,module,exports){
+},{"../hash":79}],84:[function(require,module,exports){
 var utils = exports;
 var inherits = require('inherits');
 
@@ -12120,7 +15446,7 @@ function shr64_lo(ah, al, num) {
 };
 exports.shr64_lo = shr64_lo;
 
-},{"inherits":201}],66:[function(require,module,exports){
+},{"inherits":220}],85:[function(require,module,exports){
 module.exports={
   "name": "elliptic",
   "version": "6.0.2",
@@ -12192,7 +15518,7 @@ module.exports={
   "readme": "ERROR: No README data found!"
 }
 
-},{}],67:[function(require,module,exports){
+},{}],86:[function(require,module,exports){
 module.exports={"2.16.840.1.101.3.4.1.1": "aes-128-ecb",
 "2.16.840.1.101.3.4.1.2": "aes-128-cbc",
 "2.16.840.1.101.3.4.1.3": "aes-128-ofb",
@@ -12206,7 +15532,7 @@ module.exports={"2.16.840.1.101.3.4.1.1": "aes-128-ecb",
 "2.16.840.1.101.3.4.1.43": "aes-256-ofb",
 "2.16.840.1.101.3.4.1.44": "aes-256-cfb"
 }
-},{}],68:[function(require,module,exports){
+},{}],87:[function(require,module,exports){
 // from https://github.com/indutny/self-signed/blob/gh-pages/lib/asn1.js
 // Fedor, you are amazing.
 
@@ -12325,7 +15651,7 @@ exports.signature = asn1.define('signature', function () {
   )
 })
 
-},{"asn1.js":71}],69:[function(require,module,exports){
+},{"asn1.js":90}],88:[function(require,module,exports){
 (function (Buffer){
 // adapted from https://github.com/apatil/pemstrip
 var findProc = /Proc-Type: 4,ENCRYPTED\r?\nDEK-Info: AES-((?:128)|(?:192)|(?:256))-CBC,([0-9A-H]+)\r?\n\r?\n([0-9A-z\n\r\+\/\=]+)\r?\n/m
@@ -12359,7 +15685,7 @@ module.exports = function (okey, password) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"browserify-aes":88,"buffer":4,"evp_bytestokey":103}],70:[function(require,module,exports){
+},{"browserify-aes":107,"buffer":23,"evp_bytestokey":122}],89:[function(require,module,exports){
 (function (Buffer){
 var asn1 = require('./asn1')
 var aesid = require('./aesid.json')
@@ -12464,7 +15790,7 @@ function decrypt (data, password) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./aesid.json":67,"./asn1":68,"./fixProc":69,"browserify-aes":88,"buffer":4,"pbkdf2":153}],71:[function(require,module,exports){
+},{"./aesid.json":86,"./asn1":87,"./fixProc":88,"browserify-aes":107,"buffer":23,"pbkdf2":172}],90:[function(require,module,exports){
 var asn1 = exports;
 
 asn1.bignum = require('bn.js');
@@ -12475,7 +15801,7 @@ asn1.constants = require('./asn1/constants');
 asn1.decoders = require('./asn1/decoders');
 asn1.encoders = require('./asn1/encoders');
 
-},{"./asn1/api":72,"./asn1/base":74,"./asn1/constants":78,"./asn1/decoders":80,"./asn1/encoders":83,"bn.js":41}],72:[function(require,module,exports){
+},{"./asn1/api":91,"./asn1/base":93,"./asn1/constants":97,"./asn1/decoders":99,"./asn1/encoders":102,"bn.js":60}],91:[function(require,module,exports){
 var asn1 = require('../asn1');
 var inherits = require('inherits');
 
@@ -12536,7 +15862,7 @@ Entity.prototype.encode = function encode(data, enc, /* internal */ reporter) {
   return this._getEncoder(enc).encode(data, reporter);
 };
 
-},{"../asn1":71,"inherits":201,"vm":233}],73:[function(require,module,exports){
+},{"../asn1":90,"inherits":220,"vm":255}],92:[function(require,module,exports){
 var inherits = require('inherits');
 var Reporter = require('../base').Reporter;
 var Buffer = require('buffer').Buffer;
@@ -12654,7 +15980,7 @@ EncoderBuffer.prototype.join = function join(out, offset) {
   return out;
 };
 
-},{"../base":74,"buffer":4,"inherits":201}],74:[function(require,module,exports){
+},{"../base":93,"buffer":23,"inherits":220}],93:[function(require,module,exports){
 var base = exports;
 
 base.Reporter = require('./reporter').Reporter;
@@ -12662,7 +15988,7 @@ base.DecoderBuffer = require('./buffer').DecoderBuffer;
 base.EncoderBuffer = require('./buffer').EncoderBuffer;
 base.Node = require('./node');
 
-},{"./buffer":73,"./node":75,"./reporter":76}],75:[function(require,module,exports){
+},{"./buffer":92,"./node":94,"./reporter":95}],94:[function(require,module,exports){
 var Reporter = require('../base').Reporter;
 var EncoderBuffer = require('../base').EncoderBuffer;
 var assert = require('minimalistic-assert');
@@ -13262,7 +16588,7 @@ Node.prototype._encodePrimitive = function encodePrimitive(tag, data) {
     throw new Error('Unsupported tag: ' + tag);
 };
 
-},{"../base":74,"minimalistic-assert":85}],76:[function(require,module,exports){
+},{"../base":93,"minimalistic-assert":104}],95:[function(require,module,exports){
 var inherits = require('inherits');
 
 function Reporter(options) {
@@ -13366,7 +16692,7 @@ ReporterError.prototype.rethrow = function rethrow(msg) {
   return this;
 };
 
-},{"inherits":201}],77:[function(require,module,exports){
+},{"inherits":220}],96:[function(require,module,exports){
 var constants = require('../constants');
 
 exports.tagClass = {
@@ -13410,7 +16736,7 @@ exports.tag = {
 };
 exports.tagByName = constants._reverse(exports.tag);
 
-},{"../constants":78}],78:[function(require,module,exports){
+},{"../constants":97}],97:[function(require,module,exports){
 var constants = exports;
 
 // Helper
@@ -13431,7 +16757,7 @@ constants._reverse = function reverse(map) {
 
 constants.der = require('./der');
 
-},{"./der":77}],79:[function(require,module,exports){
+},{"./der":96}],98:[function(require,module,exports){
 var inherits = require('inherits');
 
 var asn1 = require('../../asn1');
@@ -13724,13 +17050,13 @@ function derDecodeLen(buf, primitive, fail) {
   return len;
 }
 
-},{"../../asn1":71,"inherits":201}],80:[function(require,module,exports){
+},{"../../asn1":90,"inherits":220}],99:[function(require,module,exports){
 var decoders = exports;
 
 decoders.der = require('./der');
 decoders.pem = require('./pem');
 
-},{"./der":79,"./pem":81}],81:[function(require,module,exports){
+},{"./der":98,"./pem":100}],100:[function(require,module,exports){
 var inherits = require('inherits');
 var Buffer = require('buffer').Buffer;
 
@@ -13782,7 +17108,7 @@ PEMDecoder.prototype.decode = function decode(data, options) {
   return DERDecoder.prototype.decode.call(this, input, options);
 };
 
-},{"../../asn1":71,"./der":79,"buffer":4,"inherits":201}],82:[function(require,module,exports){
+},{"../../asn1":90,"./der":98,"buffer":23,"inherits":220}],101:[function(require,module,exports){
 var inherits = require('inherits');
 var Buffer = require('buffer').Buffer;
 
@@ -14056,13 +17382,13 @@ function encodeTag(tag, primitive, cls, reporter) {
   return res;
 }
 
-},{"../../asn1":71,"buffer":4,"inherits":201}],83:[function(require,module,exports){
+},{"../../asn1":90,"buffer":23,"inherits":220}],102:[function(require,module,exports){
 var encoders = exports;
 
 encoders.der = require('./der');
 encoders.pem = require('./pem');
 
-},{"./der":82,"./pem":84}],84:[function(require,module,exports){
+},{"./der":101,"./pem":103}],103:[function(require,module,exports){
 var inherits = require('inherits');
 var Buffer = require('buffer').Buffer;
 
@@ -14087,45 +17413,45 @@ PEMEncoder.prototype.encode = function encode(data, options) {
   return out.join('\n');
 };
 
-},{"../../asn1":71,"./der":82,"buffer":4,"inherits":201}],85:[function(require,module,exports){
+},{"../../asn1":90,"./der":101,"buffer":23,"inherits":220}],104:[function(require,module,exports){
+arguments[4][55][0].apply(exports,arguments)
+},{"dup":55}],105:[function(require,module,exports){
+arguments[4][29][0].apply(exports,arguments)
+},{"buffer":23,"dup":29}],106:[function(require,module,exports){
+arguments[4][30][0].apply(exports,arguments)
+},{"./aes":105,"./ghash":110,"buffer":23,"buffer-xor":119,"cipher-base":120,"dup":30,"inherits":220}],107:[function(require,module,exports){
+arguments[4][31][0].apply(exports,arguments)
+},{"./decrypter":108,"./encrypter":109,"./modes":111,"dup":31}],108:[function(require,module,exports){
+arguments[4][32][0].apply(exports,arguments)
+},{"./aes":105,"./authCipher":106,"./modes":111,"./modes/cbc":112,"./modes/cfb":113,"./modes/cfb1":114,"./modes/cfb8":115,"./modes/ctr":116,"./modes/ecb":117,"./modes/ofb":118,"./streamCipher":121,"buffer":23,"cipher-base":120,"dup":32,"evp_bytestokey":122,"inherits":220}],109:[function(require,module,exports){
+arguments[4][33][0].apply(exports,arguments)
+},{"./aes":105,"./authCipher":106,"./modes":111,"./modes/cbc":112,"./modes/cfb":113,"./modes/cfb1":114,"./modes/cfb8":115,"./modes/ctr":116,"./modes/ecb":117,"./modes/ofb":118,"./streamCipher":121,"buffer":23,"cipher-base":120,"dup":33,"evp_bytestokey":122,"inherits":220}],110:[function(require,module,exports){
+arguments[4][34][0].apply(exports,arguments)
+},{"buffer":23,"dup":34}],111:[function(require,module,exports){
+arguments[4][35][0].apply(exports,arguments)
+},{"dup":35}],112:[function(require,module,exports){
 arguments[4][36][0].apply(exports,arguments)
-},{"dup":36}],86:[function(require,module,exports){
-arguments[4][10][0].apply(exports,arguments)
-},{"buffer":4,"dup":10}],87:[function(require,module,exports){
-arguments[4][11][0].apply(exports,arguments)
-},{"./aes":86,"./ghash":91,"buffer":4,"buffer-xor":100,"cipher-base":101,"dup":11,"inherits":201}],88:[function(require,module,exports){
-arguments[4][12][0].apply(exports,arguments)
-},{"./decrypter":89,"./encrypter":90,"./modes":92,"dup":12}],89:[function(require,module,exports){
-arguments[4][13][0].apply(exports,arguments)
-},{"./aes":86,"./authCipher":87,"./modes":92,"./modes/cbc":93,"./modes/cfb":94,"./modes/cfb1":95,"./modes/cfb8":96,"./modes/ctr":97,"./modes/ecb":98,"./modes/ofb":99,"./streamCipher":102,"buffer":4,"cipher-base":101,"dup":13,"evp_bytestokey":103,"inherits":201}],90:[function(require,module,exports){
-arguments[4][14][0].apply(exports,arguments)
-},{"./aes":86,"./authCipher":87,"./modes":92,"./modes/cbc":93,"./modes/cfb":94,"./modes/cfb1":95,"./modes/cfb8":96,"./modes/ctr":97,"./modes/ecb":98,"./modes/ofb":99,"./streamCipher":102,"buffer":4,"cipher-base":101,"dup":14,"evp_bytestokey":103,"inherits":201}],91:[function(require,module,exports){
-arguments[4][15][0].apply(exports,arguments)
-},{"buffer":4,"dup":15}],92:[function(require,module,exports){
-arguments[4][16][0].apply(exports,arguments)
-},{"dup":16}],93:[function(require,module,exports){
-arguments[4][17][0].apply(exports,arguments)
-},{"buffer-xor":100,"dup":17}],94:[function(require,module,exports){
-arguments[4][18][0].apply(exports,arguments)
-},{"buffer":4,"buffer-xor":100,"dup":18}],95:[function(require,module,exports){
-arguments[4][19][0].apply(exports,arguments)
-},{"buffer":4,"dup":19}],96:[function(require,module,exports){
-arguments[4][20][0].apply(exports,arguments)
-},{"buffer":4,"dup":20}],97:[function(require,module,exports){
-arguments[4][21][0].apply(exports,arguments)
-},{"buffer":4,"buffer-xor":100,"dup":21}],98:[function(require,module,exports){
-arguments[4][22][0].apply(exports,arguments)
-},{"dup":22}],99:[function(require,module,exports){
-arguments[4][23][0].apply(exports,arguments)
-},{"buffer":4,"buffer-xor":100,"dup":23}],100:[function(require,module,exports){
-arguments[4][24][0].apply(exports,arguments)
-},{"buffer":4,"dup":24}],101:[function(require,module,exports){
-arguments[4][25][0].apply(exports,arguments)
-},{"buffer":4,"dup":25,"inherits":201,"stream":222,"string_decoder":228}],102:[function(require,module,exports){
-arguments[4][26][0].apply(exports,arguments)
-},{"./aes":86,"buffer":4,"cipher-base":101,"dup":26,"inherits":201}],103:[function(require,module,exports){
+},{"buffer-xor":119,"dup":36}],113:[function(require,module,exports){
 arguments[4][37][0].apply(exports,arguments)
-},{"buffer":4,"create-hash/md5":134,"dup":37}],104:[function(require,module,exports){
+},{"buffer":23,"buffer-xor":119,"dup":37}],114:[function(require,module,exports){
+arguments[4][38][0].apply(exports,arguments)
+},{"buffer":23,"dup":38}],115:[function(require,module,exports){
+arguments[4][39][0].apply(exports,arguments)
+},{"buffer":23,"dup":39}],116:[function(require,module,exports){
+arguments[4][40][0].apply(exports,arguments)
+},{"buffer":23,"buffer-xor":119,"dup":40}],117:[function(require,module,exports){
+arguments[4][41][0].apply(exports,arguments)
+},{"dup":41}],118:[function(require,module,exports){
+arguments[4][42][0].apply(exports,arguments)
+},{"buffer":23,"buffer-xor":119,"dup":42}],119:[function(require,module,exports){
+arguments[4][43][0].apply(exports,arguments)
+},{"buffer":23,"dup":43}],120:[function(require,module,exports){
+arguments[4][44][0].apply(exports,arguments)
+},{"buffer":23,"dup":44,"inherits":220,"stream":241,"string_decoder":251}],121:[function(require,module,exports){
+arguments[4][45][0].apply(exports,arguments)
+},{"./aes":105,"buffer":23,"cipher-base":120,"dup":45,"inherits":220}],122:[function(require,module,exports){
+arguments[4][56][0].apply(exports,arguments)
+},{"buffer":23,"create-hash/md5":153,"dup":56}],123:[function(require,module,exports){
 (function (Buffer){
 // much of this based on https://github.com/indutny/self-signed/blob/gh-pages/lib/rsa.js
 var createHmac = require('create-hmac')
@@ -14314,7 +17640,7 @@ module.exports.getKey = getKey
 module.exports.makeKey = makeKey
 
 }).call(this,require("buffer").Buffer)
-},{"./curves":40,"bn.js":41,"browserify-rsa":42,"buffer":4,"create-hmac":145,"elliptic":43,"parse-asn1":70}],105:[function(require,module,exports){
+},{"./curves":59,"bn.js":60,"browserify-rsa":61,"buffer":23,"create-hmac":164,"elliptic":62,"parse-asn1":89}],124:[function(require,module,exports){
 (function (Buffer){
 // much of this based on https://github.com/indutny/self-signed/blob/gh-pages/lib/rsa.js
 var curves = require('./curves')
@@ -14421,7 +17747,7 @@ function checkValue (b, q) {
 module.exports = verify
 
 }).call(this,require("buffer").Buffer)
-},{"./curves":40,"bn.js":41,"buffer":4,"elliptic":43,"parse-asn1":70}],106:[function(require,module,exports){
+},{"./curves":59,"bn.js":60,"buffer":23,"elliptic":62,"parse-asn1":89}],125:[function(require,module,exports){
 (function (Buffer){
 var elliptic = require('elliptic');
 var BN = require('bn.js');
@@ -14547,57 +17873,57 @@ function formatReturnValue(bn, enc, len) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"bn.js":107,"buffer":4,"elliptic":108}],107:[function(require,module,exports){
-arguments[4][41][0].apply(exports,arguments)
-},{"dup":41}],108:[function(require,module,exports){
-arguments[4][43][0].apply(exports,arguments)
-},{"../package.json":131,"./elliptic/curve":111,"./elliptic/curves":114,"./elliptic/ec":115,"./elliptic/eddsa":118,"./elliptic/hmac-drbg":121,"./elliptic/utils":123,"brorand":124,"dup":43}],109:[function(require,module,exports){
-arguments[4][44][0].apply(exports,arguments)
-},{"../../elliptic":108,"bn.js":107,"dup":44}],110:[function(require,module,exports){
-arguments[4][45][0].apply(exports,arguments)
-},{"../../elliptic":108,"../curve":111,"bn.js":107,"dup":45,"inherits":201}],111:[function(require,module,exports){
-arguments[4][46][0].apply(exports,arguments)
-},{"./base":109,"./edwards":110,"./mont":112,"./short":113,"dup":46}],112:[function(require,module,exports){
-arguments[4][47][0].apply(exports,arguments)
-},{"../../elliptic":108,"../curve":111,"bn.js":107,"dup":47,"inherits":201}],113:[function(require,module,exports){
-arguments[4][48][0].apply(exports,arguments)
-},{"../../elliptic":108,"../curve":111,"bn.js":107,"dup":48,"inherits":201}],114:[function(require,module,exports){
-arguments[4][49][0].apply(exports,arguments)
-},{"../elliptic":108,"./precomputed/secp256k1":122,"dup":49,"hash.js":125}],115:[function(require,module,exports){
-arguments[4][50][0].apply(exports,arguments)
-},{"../../elliptic":108,"./key":116,"./signature":117,"bn.js":107,"dup":50}],116:[function(require,module,exports){
-arguments[4][51][0].apply(exports,arguments)
-},{"bn.js":107,"dup":51}],117:[function(require,module,exports){
-arguments[4][52][0].apply(exports,arguments)
-},{"../../elliptic":108,"bn.js":107,"dup":52}],118:[function(require,module,exports){
-arguments[4][53][0].apply(exports,arguments)
-},{"../../elliptic":108,"./key":119,"./signature":120,"dup":53,"hash.js":125}],119:[function(require,module,exports){
-arguments[4][54][0].apply(exports,arguments)
-},{"../../elliptic":108,"dup":54}],120:[function(require,module,exports){
-arguments[4][55][0].apply(exports,arguments)
-},{"../../elliptic":108,"bn.js":107,"dup":55}],121:[function(require,module,exports){
-arguments[4][56][0].apply(exports,arguments)
-},{"../elliptic":108,"dup":56,"hash.js":125}],122:[function(require,module,exports){
-arguments[4][57][0].apply(exports,arguments)
-},{"dup":57}],123:[function(require,module,exports){
-arguments[4][58][0].apply(exports,arguments)
-},{"bn.js":107,"dup":58}],124:[function(require,module,exports){
-arguments[4][59][0].apply(exports,arguments)
-},{"dup":59}],125:[function(require,module,exports){
+},{"bn.js":126,"buffer":23,"elliptic":127}],126:[function(require,module,exports){
 arguments[4][60][0].apply(exports,arguments)
-},{"./hash/common":126,"./hash/hmac":127,"./hash/ripemd":128,"./hash/sha":129,"./hash/utils":130,"dup":60}],126:[function(require,module,exports){
-arguments[4][61][0].apply(exports,arguments)
-},{"../hash":125,"dup":61}],127:[function(require,module,exports){
+},{"dup":60}],127:[function(require,module,exports){
 arguments[4][62][0].apply(exports,arguments)
-},{"../hash":125,"dup":62}],128:[function(require,module,exports){
+},{"../package.json":150,"./elliptic/curve":130,"./elliptic/curves":133,"./elliptic/ec":134,"./elliptic/eddsa":137,"./elliptic/hmac-drbg":140,"./elliptic/utils":142,"brorand":143,"dup":62}],128:[function(require,module,exports){
 arguments[4][63][0].apply(exports,arguments)
-},{"../hash":125,"dup":63}],129:[function(require,module,exports){
+},{"../../elliptic":127,"bn.js":126,"dup":63}],129:[function(require,module,exports){
 arguments[4][64][0].apply(exports,arguments)
-},{"../hash":125,"dup":64}],130:[function(require,module,exports){
+},{"../../elliptic":127,"../curve":130,"bn.js":126,"dup":64,"inherits":220}],130:[function(require,module,exports){
 arguments[4][65][0].apply(exports,arguments)
-},{"dup":65,"inherits":201}],131:[function(require,module,exports){
+},{"./base":128,"./edwards":129,"./mont":131,"./short":132,"dup":65}],131:[function(require,module,exports){
 arguments[4][66][0].apply(exports,arguments)
-},{"dup":66}],132:[function(require,module,exports){
+},{"../../elliptic":127,"../curve":130,"bn.js":126,"dup":66,"inherits":220}],132:[function(require,module,exports){
+arguments[4][67][0].apply(exports,arguments)
+},{"../../elliptic":127,"../curve":130,"bn.js":126,"dup":67,"inherits":220}],133:[function(require,module,exports){
+arguments[4][68][0].apply(exports,arguments)
+},{"../elliptic":127,"./precomputed/secp256k1":141,"dup":68,"hash.js":144}],134:[function(require,module,exports){
+arguments[4][69][0].apply(exports,arguments)
+},{"../../elliptic":127,"./key":135,"./signature":136,"bn.js":126,"dup":69}],135:[function(require,module,exports){
+arguments[4][70][0].apply(exports,arguments)
+},{"bn.js":126,"dup":70}],136:[function(require,module,exports){
+arguments[4][71][0].apply(exports,arguments)
+},{"../../elliptic":127,"bn.js":126,"dup":71}],137:[function(require,module,exports){
+arguments[4][72][0].apply(exports,arguments)
+},{"../../elliptic":127,"./key":138,"./signature":139,"dup":72,"hash.js":144}],138:[function(require,module,exports){
+arguments[4][73][0].apply(exports,arguments)
+},{"../../elliptic":127,"dup":73}],139:[function(require,module,exports){
+arguments[4][74][0].apply(exports,arguments)
+},{"../../elliptic":127,"bn.js":126,"dup":74}],140:[function(require,module,exports){
+arguments[4][75][0].apply(exports,arguments)
+},{"../elliptic":127,"dup":75,"hash.js":144}],141:[function(require,module,exports){
+arguments[4][76][0].apply(exports,arguments)
+},{"dup":76}],142:[function(require,module,exports){
+arguments[4][77][0].apply(exports,arguments)
+},{"bn.js":126,"dup":77}],143:[function(require,module,exports){
+arguments[4][78][0].apply(exports,arguments)
+},{"dup":78}],144:[function(require,module,exports){
+arguments[4][79][0].apply(exports,arguments)
+},{"./hash/common":145,"./hash/hmac":146,"./hash/ripemd":147,"./hash/sha":148,"./hash/utils":149,"dup":79}],145:[function(require,module,exports){
+arguments[4][80][0].apply(exports,arguments)
+},{"../hash":144,"dup":80}],146:[function(require,module,exports){
+arguments[4][81][0].apply(exports,arguments)
+},{"../hash":144,"dup":81}],147:[function(require,module,exports){
+arguments[4][82][0].apply(exports,arguments)
+},{"../hash":144,"dup":82}],148:[function(require,module,exports){
+arguments[4][83][0].apply(exports,arguments)
+},{"../hash":144,"dup":83}],149:[function(require,module,exports){
+arguments[4][84][0].apply(exports,arguments)
+},{"dup":84,"inherits":220}],150:[function(require,module,exports){
+arguments[4][85][0].apply(exports,arguments)
+},{"dup":85}],151:[function(require,module,exports){
 (function (Buffer){
 'use strict';
 var inherits = require('inherits')
@@ -14653,7 +17979,7 @@ module.exports = function createHash (alg) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./md5":134,"buffer":4,"cipher-base":135,"inherits":201,"ripemd160":136,"sha.js":138}],133:[function(require,module,exports){
+},{"./md5":153,"buffer":23,"cipher-base":154,"inherits":220,"ripemd160":155,"sha.js":157}],152:[function(require,module,exports){
 (function (Buffer){
 'use strict';
 var intSize = 4;
@@ -14690,7 +18016,7 @@ function hash(buf, fn, hashSize, bigEndian) {
 }
 exports.hash = hash;
 }).call(this,require("buffer").Buffer)
-},{"buffer":4}],134:[function(require,module,exports){
+},{"buffer":23}],153:[function(require,module,exports){
 'use strict';
 /*
  * A JavaScript implementation of the RSA Data Security, Inc. MD5 Message
@@ -14847,9 +18173,9 @@ function bit_rol(num, cnt)
 module.exports = function md5(buf) {
   return helpers.hash(buf, core_md5, 16);
 };
-},{"./helpers":133}],135:[function(require,module,exports){
-arguments[4][25][0].apply(exports,arguments)
-},{"buffer":4,"dup":25,"inherits":201,"stream":222,"string_decoder":228}],136:[function(require,module,exports){
+},{"./helpers":152}],154:[function(require,module,exports){
+arguments[4][44][0].apply(exports,arguments)
+},{"buffer":23,"dup":44,"inherits":220,"stream":241,"string_decoder":251}],155:[function(require,module,exports){
 (function (Buffer){
 /*
 CryptoJS v3.1.2
@@ -15063,7 +18389,7 @@ function ripemd160 (message) {
 module.exports = ripemd160
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4}],137:[function(require,module,exports){
+},{"buffer":23}],156:[function(require,module,exports){
 (function (Buffer){
 // prototype class for hash functions
 function Hash (blockSize, finalSize) {
@@ -15136,7 +18462,7 @@ Hash.prototype._update = function () {
 module.exports = Hash
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4}],138:[function(require,module,exports){
+},{"buffer":23}],157:[function(require,module,exports){
 var exports = module.exports = function SHA (algorithm) {
   algorithm = algorithm.toLowerCase()
 
@@ -15153,7 +18479,7 @@ exports.sha256 = require('./sha256')
 exports.sha384 = require('./sha384')
 exports.sha512 = require('./sha512')
 
-},{"./sha":139,"./sha1":140,"./sha224":141,"./sha256":142,"./sha384":143,"./sha512":144}],139:[function(require,module,exports){
+},{"./sha":158,"./sha1":159,"./sha224":160,"./sha256":161,"./sha384":162,"./sha512":163}],158:[function(require,module,exports){
 (function (Buffer){
 /*
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-0, as defined
@@ -15257,7 +18583,7 @@ module.exports = Sha
 
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":137,"buffer":4,"inherits":201}],140:[function(require,module,exports){
+},{"./hash":156,"buffer":23,"inherits":220}],159:[function(require,module,exports){
 (function (Buffer){
 /*
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-1, as defined
@@ -15357,7 +18683,7 @@ Sha1.prototype._hash = function () {
 module.exports = Sha1
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":137,"buffer":4,"inherits":201}],141:[function(require,module,exports){
+},{"./hash":156,"buffer":23,"inherits":220}],160:[function(require,module,exports){
 (function (Buffer){
 /**
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-256, as defined
@@ -15413,7 +18739,7 @@ Sha224.prototype._hash = function () {
 module.exports = Sha224
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":137,"./sha256":142,"buffer":4,"inherits":201}],142:[function(require,module,exports){
+},{"./hash":156,"./sha256":161,"buffer":23,"inherits":220}],161:[function(require,module,exports){
 (function (Buffer){
 /**
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-256, as defined
@@ -15558,7 +18884,7 @@ Sha256.prototype._hash = function () {
 module.exports = Sha256
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":137,"buffer":4,"inherits":201}],143:[function(require,module,exports){
+},{"./hash":156,"buffer":23,"inherits":220}],162:[function(require,module,exports){
 (function (Buffer){
 var inherits = require('inherits')
 var SHA512 = require('./sha512')
@@ -15618,7 +18944,7 @@ Sha384.prototype._hash = function () {
 module.exports = Sha384
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":137,"./sha512":144,"buffer":4,"inherits":201}],144:[function(require,module,exports){
+},{"./hash":156,"./sha512":163,"buffer":23,"inherits":220}],163:[function(require,module,exports){
 (function (Buffer){
 var inherits = require('inherits')
 var Hash = require('./hash')
@@ -15888,7 +19214,7 @@ Sha512.prototype._hash = function () {
 module.exports = Sha512
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":137,"buffer":4,"inherits":201}],145:[function(require,module,exports){
+},{"./hash":156,"buffer":23,"inherits":220}],164:[function(require,module,exports){
 (function (Buffer){
 'use strict';
 var createHash = require('create-hash/browser');
@@ -15960,7 +19286,7 @@ module.exports = function createHmac(alg, key) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"create-hash/browser":132,"inherits":201,"stream":222}],146:[function(require,module,exports){
+},{"buffer":23,"create-hash/browser":151,"inherits":220,"stream":241}],165:[function(require,module,exports){
 (function (Buffer){
 var generatePrime = require('./lib/generatePrime');
 var primes = require('./lib/primes');
@@ -16004,7 +19330,7 @@ exports.DiffieHellmanGroup = exports.createDiffieHellmanGroup = exports.getDiffi
 exports.createDiffieHellman = exports.DiffieHellman = createDiffieHellman;
 
 }).call(this,require("buffer").Buffer)
-},{"./lib/dh":147,"./lib/generatePrime":148,"./lib/primes":149,"buffer":4}],147:[function(require,module,exports){
+},{"./lib/dh":166,"./lib/generatePrime":167,"./lib/primes":168,"buffer":23}],166:[function(require,module,exports){
 (function (Buffer){
 var BN = require('bn.js');
 var MillerRabin = require('miller-rabin');
@@ -16172,7 +19498,7 @@ function formatReturnValue(bn, enc) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./generatePrime":148,"bn.js":150,"buffer":4,"miller-rabin":151,"randombytes":199}],148:[function(require,module,exports){
+},{"./generatePrime":167,"bn.js":169,"buffer":23,"miller-rabin":170,"randombytes":218}],167:[function(require,module,exports){
 var randomBytes = require('randombytes');
 module.exports = findPrime;
 findPrime.simpleSieve = simpleSieve;
@@ -16279,7 +19605,7 @@ function findPrime(bits, gen) {
 
 }
 
-},{"bn.js":150,"miller-rabin":151,"randombytes":199}],149:[function(require,module,exports){
+},{"bn.js":169,"miller-rabin":170,"randombytes":218}],168:[function(require,module,exports){
 module.exports={
     "modp1": {
         "gen": "02",
@@ -16314,9 +19640,9 @@ module.exports={
         "prime": "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aaac42dad33170d04507a33a85521abdf1cba64ecfb850458dbef0a8aea71575d060c7db3970f85a6e1e4c7abf5ae8cdb0933d71e8c94e04a25619dcee3d2261ad2ee6bf12ffa06d98a0864d87602733ec86a64521f2b18177b200cbbe117577a615d6c770988c0bad946e208e24fa074e5ab3143db5bfce0fd108e4b82d120a92108011a723c12a787e6d788719a10bdba5b2699c327186af4e23c1a946834b6150bda2583e9ca2ad44ce8dbbbc2db04de8ef92e8efc141fbecaa6287c59474e6bc05d99b2964fa090c3a2233ba186515be7ed1f612970cee2d7afb81bdd762170481cd0069127d5b05aa993b4ea988d8fddc186ffb7dc90a6c08f4df435c93402849236c3fab4d27c7026c1d4dcb2602646dec9751e763dba37bdf8ff9406ad9e530ee5db382f413001aeb06a53ed9027d831179727b0865a8918da3edbebcf9b14ed44ce6cbaced4bb1bdb7f1447e6cc254b332051512bd7af426fb8f401378cd2bf5983ca01c64b92ecf032ea15d1721d03f482d7ce6e74fef6d55e702f46980c82b5a84031900b1c9e59e7c97fbec7e8f323a97a7e36cc88be0f1d45b7ff585ac54bd407b22b4154aacc8f6d7ebf48e1d814cc5ed20f8037e0a79715eef29be32806a1d58bb7c5da76f550aa3d8a1fbff0eb19ccb1a313d55cda56c9ec2ef29632387fe8d76e3c0468043e8f663f4860ee12bf2d5b0b7474d6e694f91e6dbe115974a3926f12fee5e438777cb6a932df8cd8bec4d073b931ba3bc832b68d9dd300741fa7bf8afc47ed2576f6936ba424663aab639c5ae4f5683423b4742bf1c978238f16cbe39d652de3fdb8befc848ad922222e04a4037c0713eb57a81a23f0c73473fc646cea306b4bcbc8862f8385ddfa9d4b7fa2c087e879683303ed5bdd3a062b3cf5b3a278a66d2a13f83f44f82ddf310ee074ab6a364597e899a0255dc164f31cc50846851df9ab48195ded7ea1b1d510bd7ee74d73faf36bc31ecfa268359046f4eb879f924009438b481c6cd7889a002ed5ee382bc9190da6fc026e479558e4475677e9aa9e3050e2765694dfc81f56e880b96e7160c980dd98edd3dfffffffffffffffff"
     }
 }
-},{}],150:[function(require,module,exports){
-arguments[4][41][0].apply(exports,arguments)
-},{"dup":41}],151:[function(require,module,exports){
+},{}],169:[function(require,module,exports){
+arguments[4][60][0].apply(exports,arguments)
+},{"dup":60}],170:[function(require,module,exports){
 var bn = require('bn.js');
 var brorand = require('brorand');
 
@@ -16431,9 +19757,9 @@ MillerRabin.prototype.getDivisor = function getDivisor(n, k) {
   return false;
 };
 
-},{"bn.js":150,"brorand":152}],152:[function(require,module,exports){
-arguments[4][59][0].apply(exports,arguments)
-},{"dup":59}],153:[function(require,module,exports){
+},{"bn.js":169,"brorand":171}],171:[function(require,module,exports){
+arguments[4][78][0].apply(exports,arguments)
+},{"dup":78}],172:[function(require,module,exports){
 (function (Buffer){
 var createHmac = require('create-hmac')
 var MAX_ALLOC = Math.pow(2, 30) - 1 // default in iojs
@@ -16517,7 +19843,7 @@ function pbkdf2Sync (password, salt, iterations, keylen, digest) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"create-hmac":145}],154:[function(require,module,exports){
+},{"buffer":23,"create-hmac":164}],173:[function(require,module,exports){
 exports.publicEncrypt = require('./publicEncrypt');
 exports.privateDecrypt = require('./privateDecrypt');
 
@@ -16528,7 +19854,7 @@ exports.privateEncrypt = function privateEncrypt(key, buf) {
 exports.publicDecrypt = function publicDecrypt(key, buf) {
   return exports.privateDecrypt(key, buf, true);
 };
-},{"./privateDecrypt":195,"./publicEncrypt":196}],155:[function(require,module,exports){
+},{"./privateDecrypt":214,"./publicEncrypt":215}],174:[function(require,module,exports){
 (function (Buffer){
 var createHash = require('create-hash');
 module.exports = function (seed, len) {
@@ -16547,85 +19873,85 @@ function i2ops(c) {
   return out;
 }
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"create-hash":132}],156:[function(require,module,exports){
-arguments[4][41][0].apply(exports,arguments)
-},{"dup":41}],157:[function(require,module,exports){
-arguments[4][42][0].apply(exports,arguments)
-},{"bn.js":156,"buffer":4,"dup":42,"randombytes":199}],158:[function(require,module,exports){
-arguments[4][67][0].apply(exports,arguments)
-},{"dup":67}],159:[function(require,module,exports){
-arguments[4][68][0].apply(exports,arguments)
-},{"asn1.js":162,"dup":68}],160:[function(require,module,exports){
-arguments[4][69][0].apply(exports,arguments)
-},{"browserify-aes":179,"buffer":4,"dup":69,"evp_bytestokey":194}],161:[function(require,module,exports){
-arguments[4][70][0].apply(exports,arguments)
-},{"./aesid.json":158,"./asn1":159,"./fixProc":160,"browserify-aes":179,"buffer":4,"dup":70,"pbkdf2":153}],162:[function(require,module,exports){
-arguments[4][71][0].apply(exports,arguments)
-},{"./asn1/api":163,"./asn1/base":165,"./asn1/constants":169,"./asn1/decoders":171,"./asn1/encoders":174,"bn.js":156,"dup":71}],163:[function(require,module,exports){
-arguments[4][72][0].apply(exports,arguments)
-},{"../asn1":162,"dup":72,"inherits":201,"vm":233}],164:[function(require,module,exports){
-arguments[4][73][0].apply(exports,arguments)
-},{"../base":165,"buffer":4,"dup":73,"inherits":201}],165:[function(require,module,exports){
-arguments[4][74][0].apply(exports,arguments)
-},{"./buffer":164,"./node":166,"./reporter":167,"dup":74}],166:[function(require,module,exports){
-arguments[4][75][0].apply(exports,arguments)
-},{"../base":165,"dup":75,"minimalistic-assert":176}],167:[function(require,module,exports){
-arguments[4][76][0].apply(exports,arguments)
-},{"dup":76,"inherits":201}],168:[function(require,module,exports){
-arguments[4][77][0].apply(exports,arguments)
-},{"../constants":169,"dup":77}],169:[function(require,module,exports){
-arguments[4][78][0].apply(exports,arguments)
-},{"./der":168,"dup":78}],170:[function(require,module,exports){
-arguments[4][79][0].apply(exports,arguments)
-},{"../../asn1":162,"dup":79,"inherits":201}],171:[function(require,module,exports){
-arguments[4][80][0].apply(exports,arguments)
-},{"./der":170,"./pem":172,"dup":80}],172:[function(require,module,exports){
-arguments[4][81][0].apply(exports,arguments)
-},{"../../asn1":162,"./der":170,"buffer":4,"dup":81,"inherits":201}],173:[function(require,module,exports){
-arguments[4][82][0].apply(exports,arguments)
-},{"../../asn1":162,"buffer":4,"dup":82,"inherits":201}],174:[function(require,module,exports){
-arguments[4][83][0].apply(exports,arguments)
-},{"./der":173,"./pem":175,"dup":83}],175:[function(require,module,exports){
-arguments[4][84][0].apply(exports,arguments)
-},{"../../asn1":162,"./der":173,"buffer":4,"dup":84,"inherits":201}],176:[function(require,module,exports){
+},{"buffer":23,"create-hash":151}],175:[function(require,module,exports){
+arguments[4][60][0].apply(exports,arguments)
+},{"dup":60}],176:[function(require,module,exports){
+arguments[4][61][0].apply(exports,arguments)
+},{"bn.js":175,"buffer":23,"dup":61,"randombytes":218}],177:[function(require,module,exports){
+arguments[4][86][0].apply(exports,arguments)
+},{"dup":86}],178:[function(require,module,exports){
+arguments[4][87][0].apply(exports,arguments)
+},{"asn1.js":181,"dup":87}],179:[function(require,module,exports){
+arguments[4][88][0].apply(exports,arguments)
+},{"browserify-aes":198,"buffer":23,"dup":88,"evp_bytestokey":213}],180:[function(require,module,exports){
+arguments[4][89][0].apply(exports,arguments)
+},{"./aesid.json":177,"./asn1":178,"./fixProc":179,"browserify-aes":198,"buffer":23,"dup":89,"pbkdf2":172}],181:[function(require,module,exports){
+arguments[4][90][0].apply(exports,arguments)
+},{"./asn1/api":182,"./asn1/base":184,"./asn1/constants":188,"./asn1/decoders":190,"./asn1/encoders":193,"bn.js":175,"dup":90}],182:[function(require,module,exports){
+arguments[4][91][0].apply(exports,arguments)
+},{"../asn1":181,"dup":91,"inherits":220,"vm":255}],183:[function(require,module,exports){
+arguments[4][92][0].apply(exports,arguments)
+},{"../base":184,"buffer":23,"dup":92,"inherits":220}],184:[function(require,module,exports){
+arguments[4][93][0].apply(exports,arguments)
+},{"./buffer":183,"./node":185,"./reporter":186,"dup":93}],185:[function(require,module,exports){
+arguments[4][94][0].apply(exports,arguments)
+},{"../base":184,"dup":94,"minimalistic-assert":195}],186:[function(require,module,exports){
+arguments[4][95][0].apply(exports,arguments)
+},{"dup":95,"inherits":220}],187:[function(require,module,exports){
+arguments[4][96][0].apply(exports,arguments)
+},{"../constants":188,"dup":96}],188:[function(require,module,exports){
+arguments[4][97][0].apply(exports,arguments)
+},{"./der":187,"dup":97}],189:[function(require,module,exports){
+arguments[4][98][0].apply(exports,arguments)
+},{"../../asn1":181,"dup":98,"inherits":220}],190:[function(require,module,exports){
+arguments[4][99][0].apply(exports,arguments)
+},{"./der":189,"./pem":191,"dup":99}],191:[function(require,module,exports){
+arguments[4][100][0].apply(exports,arguments)
+},{"../../asn1":181,"./der":189,"buffer":23,"dup":100,"inherits":220}],192:[function(require,module,exports){
+arguments[4][101][0].apply(exports,arguments)
+},{"../../asn1":181,"buffer":23,"dup":101,"inherits":220}],193:[function(require,module,exports){
+arguments[4][102][0].apply(exports,arguments)
+},{"./der":192,"./pem":194,"dup":102}],194:[function(require,module,exports){
+arguments[4][103][0].apply(exports,arguments)
+},{"../../asn1":181,"./der":192,"buffer":23,"dup":103,"inherits":220}],195:[function(require,module,exports){
+arguments[4][55][0].apply(exports,arguments)
+},{"dup":55}],196:[function(require,module,exports){
+arguments[4][29][0].apply(exports,arguments)
+},{"buffer":23,"dup":29}],197:[function(require,module,exports){
+arguments[4][30][0].apply(exports,arguments)
+},{"./aes":196,"./ghash":201,"buffer":23,"buffer-xor":210,"cipher-base":211,"dup":30,"inherits":220}],198:[function(require,module,exports){
+arguments[4][31][0].apply(exports,arguments)
+},{"./decrypter":199,"./encrypter":200,"./modes":202,"dup":31}],199:[function(require,module,exports){
+arguments[4][32][0].apply(exports,arguments)
+},{"./aes":196,"./authCipher":197,"./modes":202,"./modes/cbc":203,"./modes/cfb":204,"./modes/cfb1":205,"./modes/cfb8":206,"./modes/ctr":207,"./modes/ecb":208,"./modes/ofb":209,"./streamCipher":212,"buffer":23,"cipher-base":211,"dup":32,"evp_bytestokey":213,"inherits":220}],200:[function(require,module,exports){
+arguments[4][33][0].apply(exports,arguments)
+},{"./aes":196,"./authCipher":197,"./modes":202,"./modes/cbc":203,"./modes/cfb":204,"./modes/cfb1":205,"./modes/cfb8":206,"./modes/ctr":207,"./modes/ecb":208,"./modes/ofb":209,"./streamCipher":212,"buffer":23,"cipher-base":211,"dup":33,"evp_bytestokey":213,"inherits":220}],201:[function(require,module,exports){
+arguments[4][34][0].apply(exports,arguments)
+},{"buffer":23,"dup":34}],202:[function(require,module,exports){
+arguments[4][35][0].apply(exports,arguments)
+},{"dup":35}],203:[function(require,module,exports){
 arguments[4][36][0].apply(exports,arguments)
-},{"dup":36}],177:[function(require,module,exports){
-arguments[4][10][0].apply(exports,arguments)
-},{"buffer":4,"dup":10}],178:[function(require,module,exports){
-arguments[4][11][0].apply(exports,arguments)
-},{"./aes":177,"./ghash":182,"buffer":4,"buffer-xor":191,"cipher-base":192,"dup":11,"inherits":201}],179:[function(require,module,exports){
-arguments[4][12][0].apply(exports,arguments)
-},{"./decrypter":180,"./encrypter":181,"./modes":183,"dup":12}],180:[function(require,module,exports){
-arguments[4][13][0].apply(exports,arguments)
-},{"./aes":177,"./authCipher":178,"./modes":183,"./modes/cbc":184,"./modes/cfb":185,"./modes/cfb1":186,"./modes/cfb8":187,"./modes/ctr":188,"./modes/ecb":189,"./modes/ofb":190,"./streamCipher":193,"buffer":4,"cipher-base":192,"dup":13,"evp_bytestokey":194,"inherits":201}],181:[function(require,module,exports){
-arguments[4][14][0].apply(exports,arguments)
-},{"./aes":177,"./authCipher":178,"./modes":183,"./modes/cbc":184,"./modes/cfb":185,"./modes/cfb1":186,"./modes/cfb8":187,"./modes/ctr":188,"./modes/ecb":189,"./modes/ofb":190,"./streamCipher":193,"buffer":4,"cipher-base":192,"dup":14,"evp_bytestokey":194,"inherits":201}],182:[function(require,module,exports){
-arguments[4][15][0].apply(exports,arguments)
-},{"buffer":4,"dup":15}],183:[function(require,module,exports){
-arguments[4][16][0].apply(exports,arguments)
-},{"dup":16}],184:[function(require,module,exports){
-arguments[4][17][0].apply(exports,arguments)
-},{"buffer-xor":191,"dup":17}],185:[function(require,module,exports){
-arguments[4][18][0].apply(exports,arguments)
-},{"buffer":4,"buffer-xor":191,"dup":18}],186:[function(require,module,exports){
-arguments[4][19][0].apply(exports,arguments)
-},{"buffer":4,"dup":19}],187:[function(require,module,exports){
-arguments[4][20][0].apply(exports,arguments)
-},{"buffer":4,"dup":20}],188:[function(require,module,exports){
-arguments[4][21][0].apply(exports,arguments)
-},{"buffer":4,"buffer-xor":191,"dup":21}],189:[function(require,module,exports){
-arguments[4][22][0].apply(exports,arguments)
-},{"dup":22}],190:[function(require,module,exports){
-arguments[4][23][0].apply(exports,arguments)
-},{"buffer":4,"buffer-xor":191,"dup":23}],191:[function(require,module,exports){
-arguments[4][24][0].apply(exports,arguments)
-},{"buffer":4,"dup":24}],192:[function(require,module,exports){
-arguments[4][25][0].apply(exports,arguments)
-},{"buffer":4,"dup":25,"inherits":201,"stream":222,"string_decoder":228}],193:[function(require,module,exports){
-arguments[4][26][0].apply(exports,arguments)
-},{"./aes":177,"buffer":4,"cipher-base":192,"dup":26,"inherits":201}],194:[function(require,module,exports){
+},{"buffer-xor":210,"dup":36}],204:[function(require,module,exports){
 arguments[4][37][0].apply(exports,arguments)
-},{"buffer":4,"create-hash/md5":134,"dup":37}],195:[function(require,module,exports){
+},{"buffer":23,"buffer-xor":210,"dup":37}],205:[function(require,module,exports){
+arguments[4][38][0].apply(exports,arguments)
+},{"buffer":23,"dup":38}],206:[function(require,module,exports){
+arguments[4][39][0].apply(exports,arguments)
+},{"buffer":23,"dup":39}],207:[function(require,module,exports){
+arguments[4][40][0].apply(exports,arguments)
+},{"buffer":23,"buffer-xor":210,"dup":40}],208:[function(require,module,exports){
+arguments[4][41][0].apply(exports,arguments)
+},{"dup":41}],209:[function(require,module,exports){
+arguments[4][42][0].apply(exports,arguments)
+},{"buffer":23,"buffer-xor":210,"dup":42}],210:[function(require,module,exports){
+arguments[4][43][0].apply(exports,arguments)
+},{"buffer":23,"dup":43}],211:[function(require,module,exports){
+arguments[4][44][0].apply(exports,arguments)
+},{"buffer":23,"dup":44,"inherits":220,"stream":241,"string_decoder":251}],212:[function(require,module,exports){
+arguments[4][45][0].apply(exports,arguments)
+},{"./aes":196,"buffer":23,"cipher-base":211,"dup":45,"inherits":220}],213:[function(require,module,exports){
+arguments[4][56][0].apply(exports,arguments)
+},{"buffer":23,"create-hash/md5":153,"dup":56}],214:[function(require,module,exports){
 (function (Buffer){
 var parseKeys = require('parse-asn1');
 var mgf = require('./mgf');
@@ -16736,7 +20062,7 @@ function compare(a, b){
   return dif;
 }
 }).call(this,require("buffer").Buffer)
-},{"./mgf":155,"./withPublic":197,"./xor":198,"bn.js":156,"browserify-rsa":157,"buffer":4,"create-hash":132,"parse-asn1":161}],196:[function(require,module,exports){
+},{"./mgf":174,"./withPublic":216,"./xor":217,"bn.js":175,"browserify-rsa":176,"buffer":23,"create-hash":151,"parse-asn1":180}],215:[function(require,module,exports){
 (function (Buffer){
 var parseKeys = require('parse-asn1');
 var randomBytes = require('randombytes');
@@ -16834,7 +20160,7 @@ function nonZero(len, crypto) {
   return out;
 }
 }).call(this,require("buffer").Buffer)
-},{"./mgf":155,"./withPublic":197,"./xor":198,"bn.js":156,"browserify-rsa":157,"buffer":4,"create-hash":132,"parse-asn1":161,"randombytes":199}],197:[function(require,module,exports){
+},{"./mgf":174,"./withPublic":216,"./xor":217,"bn.js":175,"browserify-rsa":176,"buffer":23,"create-hash":151,"parse-asn1":180,"randombytes":218}],216:[function(require,module,exports){
 (function (Buffer){
 var bn = require('bn.js');
 function withPublic(paddedMsg, key) {
@@ -16847,7 +20173,7 @@ function withPublic(paddedMsg, key) {
 
 module.exports = withPublic;
 }).call(this,require("buffer").Buffer)
-},{"bn.js":156,"buffer":4}],198:[function(require,module,exports){
+},{"bn.js":175,"buffer":23}],217:[function(require,module,exports){
 module.exports = function xor(a, b) {
   var len = a.length;
   var i = -1;
@@ -16856,7 +20182,7 @@ module.exports = function xor(a, b) {
   }
   return a
 };
-},{}],199:[function(require,module,exports){
+},{}],218:[function(require,module,exports){
 (function (process,global,Buffer){
 'use strict';
 
@@ -16888,7 +20214,7 @@ function oldBrowser() {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"_process":204,"buffer":4}],200:[function(require,module,exports){
+},{"_process":223,"buffer":23}],219:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -16972,11 +20298,18 @@ EventEmitter.prototype.emit = function(type) {
         break;
       // slower
       default:
-        args = Array.prototype.slice.call(arguments, 1);
+        len = arguments.length;
+        args = new Array(len - 1);
+        for (i = 1; i < len; i++)
+          args[i - 1] = arguments[i];
         handler.apply(this, args);
     }
   } else if (isObject(handler)) {
-    args = Array.prototype.slice.call(arguments, 1);
+    len = arguments.length;
+    args = new Array(len - 1);
+    for (i = 1; i < len; i++)
+      args[i - 1] = arguments[i];
+
     listeners = handler.slice();
     len = listeners.length;
     for (i = 0; i < len; i++)
@@ -17014,6 +20347,7 @@ EventEmitter.prototype.addListener = function(type, listener) {
 
   // Check for listener leak
   if (isObject(this._events[type]) && !this._events[type].warned) {
+    var m;
     if (!isUndefined(this._maxListeners)) {
       m = this._maxListeners;
     } else {
@@ -17135,7 +20469,7 @@ EventEmitter.prototype.removeAllListeners = function(type) {
 
   if (isFunction(listeners)) {
     this.removeListener(type, listeners);
-  } else if (listeners) {
+  } else {
     // LIFO order
     while (listeners.length)
       this.removeListener(type, listeners[listeners.length - 1]);
@@ -17156,20 +20490,15 @@ EventEmitter.prototype.listeners = function(type) {
   return ret;
 };
 
-EventEmitter.prototype.listenerCount = function(type) {
-  if (this._events) {
-    var evlistener = this._events[type];
-
-    if (isFunction(evlistener))
-      return 1;
-    else if (evlistener)
-      return evlistener.length;
-  }
-  return 0;
-};
-
 EventEmitter.listenerCount = function(emitter, type) {
-  return emitter.listenerCount(type);
+  var ret;
+  if (!emitter._events || !emitter._events[type])
+    ret = 0;
+  else if (isFunction(emitter._events[type]))
+    ret = 1;
+  else
+    ret = emitter._events[type].length;
+  return ret;
 };
 
 function isFunction(arg) {
@@ -17188,7 +20517,7 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}],201:[function(require,module,exports){
+},{}],220:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -17213,7 +20542,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],202:[function(require,module,exports){
+},{}],221:[function(require,module,exports){
 /**
  * Determine if an object is Buffer
  *
@@ -17232,12 +20561,12 @@ module.exports = function (obj) {
     ))
 }
 
-},{}],203:[function(require,module,exports){
+},{}],222:[function(require,module,exports){
 module.exports = Array.isArray || function (arr) {
   return Object.prototype.toString.call(arr) == '[object Array]';
 };
 
-},{}],204:[function(require,module,exports){
+},{}],223:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -17330,7 +20659,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],205:[function(require,module,exports){
+},{}],224:[function(require,module,exports){
 (function (global){
 /*! https://mths.be/punycode v1.3.2 by @mathias */
 ;(function(root) {
@@ -17864,7 +21193,7 @@ process.umask = function() { return 0; };
 }(this));
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],206:[function(require,module,exports){
+},{}],225:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -17950,7 +21279,7 @@ var isArray = Array.isArray || function (xs) {
   return Object.prototype.toString.call(xs) === '[object Array]';
 };
 
-},{}],207:[function(require,module,exports){
+},{}],226:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -18037,16 +21366,16 @@ var objectKeys = Object.keys || function (obj) {
   return res;
 };
 
-},{}],208:[function(require,module,exports){
+},{}],227:[function(require,module,exports){
 'use strict';
 
 exports.decode = exports.parse = require('./decode');
 exports.encode = exports.stringify = require('./encode');
 
-},{"./decode":206,"./encode":207}],209:[function(require,module,exports){
+},{"./decode":225,"./encode":226}],228:[function(require,module,exports){
 module.exports = require("./lib/_stream_duplex.js")
 
-},{"./lib/_stream_duplex.js":210}],210:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":229}],229:[function(require,module,exports){
 // a duplex stream is just a stream that is both readable and writable.
 // Since JS doesn't have multiple prototypal inheritance, this class
 // prototypally inherits from Readable, and then parasitically from
@@ -18130,7 +21459,7 @@ function forEach (xs, f) {
   }
 }
 
-},{"./_stream_readable":212,"./_stream_writable":214,"core-util-is":215,"inherits":201,"process-nextick-args":216}],211:[function(require,module,exports){
+},{"./_stream_readable":231,"./_stream_writable":233,"core-util-is":234,"inherits":220,"process-nextick-args":235}],230:[function(require,module,exports){
 // a passthrough stream.
 // basically just the most minimal sort of Transform stream.
 // Every written chunk gets output as-is.
@@ -18159,7 +21488,7 @@ PassThrough.prototype._transform = function(chunk, encoding, cb) {
   cb(null, chunk);
 };
 
-},{"./_stream_transform":213,"core-util-is":215,"inherits":201}],212:[function(require,module,exports){
+},{"./_stream_transform":232,"core-util-is":234,"inherits":220}],231:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -19136,7 +22465,7 @@ function indexOf (xs, x) {
 }
 
 }).call(this,require('_process'))
-},{"./_stream_duplex":210,"_process":204,"buffer":4,"core-util-is":215,"events":200,"inherits":201,"isarray":203,"process-nextick-args":216,"string_decoder/":228,"util":3}],213:[function(require,module,exports){
+},{"./_stream_duplex":229,"_process":223,"buffer":23,"core-util-is":234,"events":219,"inherits":220,"isarray":222,"process-nextick-args":235,"string_decoder/":251,"util":22}],232:[function(require,module,exports){
 // a transform stream is a readable/writable stream where you do
 // something with the data.  Sometimes it's called a "filter",
 // but that's not a great name for it, since that implies a thing where
@@ -19335,7 +22664,7 @@ function done(stream, er) {
   return stream.push(null);
 }
 
-},{"./_stream_duplex":210,"core-util-is":215,"inherits":201}],214:[function(require,module,exports){
+},{"./_stream_duplex":229,"core-util-is":234,"inherits":220}],233:[function(require,module,exports){
 // A bit simpler than readable streams.
 // Implement an async ._write(chunk, encoding, cb), and it'll handle all
 // the drain event emission and buffering.
@@ -19864,7 +23193,7 @@ function endWritable(stream, state, cb) {
   state.ended = true;
 }
 
-},{"./_stream_duplex":210,"buffer":4,"core-util-is":215,"events":200,"inherits":201,"process-nextick-args":216,"util-deprecate":217}],215:[function(require,module,exports){
+},{"./_stream_duplex":229,"buffer":23,"core-util-is":234,"events":219,"inherits":220,"process-nextick-args":235,"util-deprecate":236}],234:[function(require,module,exports){
 (function (Buffer){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -19974,7 +23303,7 @@ function objectToString(o) {
   return Object.prototype.toString.call(o);
 }
 }).call(this,{"isBuffer":require("../../../../insert-module-globals/node_modules/is-buffer/index.js")})
-},{"../../../../insert-module-globals/node_modules/is-buffer/index.js":202}],216:[function(require,module,exports){
+},{"../../../../insert-module-globals/node_modules/is-buffer/index.js":221}],235:[function(require,module,exports){
 (function (process){
 'use strict';
 module.exports = nextTick;
@@ -19991,7 +23320,7 @@ function nextTick(fn) {
 }
 
 }).call(this,require('_process'))
-},{"_process":204}],217:[function(require,module,exports){
+},{"_process":223}],236:[function(require,module,exports){
 (function (global){
 
 /**
@@ -20062,10 +23391,10 @@ function config (name) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],218:[function(require,module,exports){
+},{}],237:[function(require,module,exports){
 module.exports = require("./lib/_stream_passthrough.js")
 
-},{"./lib/_stream_passthrough.js":211}],219:[function(require,module,exports){
+},{"./lib/_stream_passthrough.js":230}],238:[function(require,module,exports){
 var Stream = (function (){
   try {
     return require('st' + 'ream'); // hack to fix a circular dependency issue when used with browserify
@@ -20079,13 +23408,13 @@ exports.Duplex = require('./lib/_stream_duplex.js');
 exports.Transform = require('./lib/_stream_transform.js');
 exports.PassThrough = require('./lib/_stream_passthrough.js');
 
-},{"./lib/_stream_duplex.js":210,"./lib/_stream_passthrough.js":211,"./lib/_stream_readable.js":212,"./lib/_stream_transform.js":213,"./lib/_stream_writable.js":214}],220:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":229,"./lib/_stream_passthrough.js":230,"./lib/_stream_readable.js":231,"./lib/_stream_transform.js":232,"./lib/_stream_writable.js":233}],239:[function(require,module,exports){
 module.exports = require("./lib/_stream_transform.js")
 
-},{"./lib/_stream_transform.js":213}],221:[function(require,module,exports){
+},{"./lib/_stream_transform.js":232}],240:[function(require,module,exports){
 module.exports = require("./lib/_stream_writable.js")
 
-},{"./lib/_stream_writable.js":214}],222:[function(require,module,exports){
+},{"./lib/_stream_writable.js":233}],241:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -20214,7 +23543,7 @@ Stream.prototype.pipe = function(dest, options) {
   return dest;
 };
 
-},{"events":200,"inherits":201,"readable-stream/duplex.js":209,"readable-stream/passthrough.js":218,"readable-stream/readable.js":219,"readable-stream/transform.js":220,"readable-stream/writable.js":221}],223:[function(require,module,exports){
+},{"events":219,"inherits":220,"readable-stream/duplex.js":228,"readable-stream/passthrough.js":237,"readable-stream/readable.js":238,"readable-stream/transform.js":239,"readable-stream/writable.js":240}],242:[function(require,module,exports){
 var ClientRequest = require('./lib/request')
 var extend = require('xtend')
 var statusCodes = require('builtin-status-codes')
@@ -20289,7 +23618,7 @@ http.METHODS = [
 	'UNLOCK',
 	'UNSUBSCRIBE'
 ]
-},{"./lib/request":225,"builtin-status-codes":227,"url":229,"xtend":235}],224:[function(require,module,exports){
+},{"./lib/request":244,"builtin-status-codes":246,"url":252,"xtend":257}],243:[function(require,module,exports){
 (function (global){
 exports.fetch = isFunction(global.fetch) && isFunction(global.ReadableByteStream)
 
@@ -20333,11 +23662,14 @@ function isFunction (value) {
 xhr = null // Help gc
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],225:[function(require,module,exports){
+},{}],244:[function(require,module,exports){
 (function (process,global,Buffer){
 // var Base64 = require('Base64')
 var capability = require('./capability')
+var foreach = require('foreach')
+var indexOf = require('indexof')
 var inherits = require('inherits')
+var keys = require('object-keys')
 var response = require('./response')
 var stream = require('stream')
 
@@ -20369,7 +23701,7 @@ var ClientRequest = module.exports = function (opts) {
 	self._headers = {}
 	if (opts.auth)
 		self.setHeader('Authorization', 'Basic ' + new Buffer(opts.auth).toString('base64'))
-	Object.keys(opts.headers).forEach(function (name) {
+	foreach(keys(opts.headers), function (name) {
 		self.setHeader(name, opts.headers[name])
 	})
 
@@ -20402,7 +23734,7 @@ ClientRequest.prototype.setHeader = function (name, value) {
 	// This check is not necessary, but it prevents warnings from browsers about setting unsafe
 	// headers. To be honest I'm not entirely sure hiding these warnings is a good thing, but
 	// http-browserify did it, so I will too.
-	if (unsafeHeaders.indexOf(lowerName) !== -1)
+	if (indexOf(unsafeHeaders, lowerName) !== -1)
 		return
 
 	self._headers[lowerName] = {
@@ -20430,7 +23762,7 @@ ClientRequest.prototype._onFinish = function () {
 
 	var headersObj = self._headers
 	var body
-	if (opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'PATCH') {
+	if (opts.method === 'POST' || opts.method === 'PUT') {
 		if (capability.blobConstructor) {
 			body = new global.Blob(self._body.map(function (buffer) {
 				return buffer.toArrayBuffer()
@@ -20444,7 +23776,7 @@ ClientRequest.prototype._onFinish = function () {
 	}
 
 	if (self._mode === 'fetch') {
-		var headers = Object.keys(headersObj).map(function (name) {
+		var headers = keys(headersObj).map(function (name) {
 			return [headersObj[name].name, headersObj[name].value]
 		})
 
@@ -20457,7 +23789,7 @@ ClientRequest.prototype._onFinish = function () {
 		}).then(function (response) {
 			self._fetchResponse = response
 			self._connect()
-		}, function (reason) {
+		}).then(undefined, function (reason) {
 			self.emit('error', reason)
 		})
 	} else {
@@ -20481,7 +23813,7 @@ ClientRequest.prototype._onFinish = function () {
 		if (self._mode === 'text' && 'overrideMimeType' in xhr)
 			xhr.overrideMimeType('text/plain; charset=x-user-defined')
 
-		Object.keys(headersObj).forEach(function (name) {
+		foreach(keys(headersObj), function (name) {
 			xhr.setRequestHeader(headersObj[name].name, headersObj[name].value)
 		})
 
@@ -20612,9 +23944,10 @@ var unsafeHeaders = [
 ]
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"./capability":224,"./response":226,"_process":204,"buffer":4,"inherits":201,"stream":222}],226:[function(require,module,exports){
+},{"./capability":243,"./response":245,"_process":223,"buffer":23,"foreach":247,"indexof":248,"inherits":220,"object-keys":249,"stream":241}],245:[function(require,module,exports){
 (function (process,global,Buffer){
 var capability = require('./capability')
+var foreach = require('foreach')
 var inherits = require('inherits')
 var stream = require('stream')
 
@@ -20679,7 +24012,7 @@ var IncomingMessage = exports.IncomingMessage = function (xhr, response, mode) {
 		self.statusCode = xhr.status
 		self.statusMessage = xhr.statusText
 		var headers = xhr.getAllResponseHeaders().split(/\r?\n/)
-		headers.forEach(function (header) {
+		foreach(headers, function (header) {
 			var matches = header.match(/^([^:]+):\s*(.*)/)
 			if (matches) {
 				var key = matches[1].toLowerCase()
@@ -20788,7 +24121,7 @@ IncomingMessage.prototype._onXHRProgress = function () {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"./capability":224,"_process":204,"buffer":4,"inherits":201,"stream":222}],227:[function(require,module,exports){
+},{"./capability":243,"_process":223,"buffer":23,"foreach":247,"inherits":220,"stream":241}],246:[function(require,module,exports){
 module.exports = {
   "100": "Continue",
   "101": "Switching Protocols",
@@ -20849,7 +24182,191 @@ module.exports = {
   "511": "Network Authentication Required"
 }
 
-},{}],228:[function(require,module,exports){
+},{}],247:[function(require,module,exports){
+
+var hasOwn = Object.prototype.hasOwnProperty;
+var toString = Object.prototype.toString;
+
+module.exports = function forEach (obj, fn, ctx) {
+    if (toString.call(fn) !== '[object Function]') {
+        throw new TypeError('iterator must be a function');
+    }
+    var l = obj.length;
+    if (l === +l) {
+        for (var i = 0; i < l; i++) {
+            fn.call(ctx, obj[i], i, obj);
+        }
+    } else {
+        for (var k in obj) {
+            if (hasOwn.call(obj, k)) {
+                fn.call(ctx, obj[k], k, obj);
+            }
+        }
+    }
+};
+
+
+},{}],248:[function(require,module,exports){
+
+var indexOf = [].indexOf;
+
+module.exports = function(arr, obj){
+  if (indexOf) return arr.indexOf(obj);
+  for (var i = 0; i < arr.length; ++i) {
+    if (arr[i] === obj) return i;
+  }
+  return -1;
+};
+},{}],249:[function(require,module,exports){
+'use strict';
+
+// modified from https://github.com/es-shims/es5-shim
+var has = Object.prototype.hasOwnProperty;
+var toStr = Object.prototype.toString;
+var slice = Array.prototype.slice;
+var isArgs = require('./isArguments');
+var hasDontEnumBug = !({ toString: null }).propertyIsEnumerable('toString');
+var hasProtoEnumBug = function () {}.propertyIsEnumerable('prototype');
+var dontEnums = [
+	'toString',
+	'toLocaleString',
+	'valueOf',
+	'hasOwnProperty',
+	'isPrototypeOf',
+	'propertyIsEnumerable',
+	'constructor'
+];
+var equalsConstructorPrototype = function (o) {
+	var ctor = o.constructor;
+	return ctor && ctor.prototype === o;
+};
+var blacklistedKeys = {
+	$console: true,
+	$frame: true,
+	$frameElement: true,
+	$frames: true,
+	$parent: true,
+	$self: true,
+	$webkitIndexedDB: true,
+	$webkitStorageInfo: true,
+	$window: true
+};
+var hasAutomationEqualityBug = (function () {
+	/* global window */
+	if (typeof window === 'undefined') { return false; }
+	for (var k in window) {
+		try {
+			if (!blacklistedKeys['$' + k] && has.call(window, k) && window[k] !== null && typeof window[k] === 'object') {
+				try {
+					equalsConstructorPrototype(window[k]);
+				} catch (e) {
+					return true;
+				}
+			}
+		} catch (e) {
+			return true;
+		}
+	}
+	return false;
+}());
+var equalsConstructorPrototypeIfNotBuggy = function (o) {
+	/* global window */
+	if (typeof window === 'undefined' || !hasAutomationEqualityBug) {
+		return equalsConstructorPrototype(o);
+	}
+	try {
+		return equalsConstructorPrototype(o);
+	} catch (e) {
+		return false;
+	}
+};
+
+var keysShim = function keys(object) {
+	var isObject = object !== null && typeof object === 'object';
+	var isFunction = toStr.call(object) === '[object Function]';
+	var isArguments = isArgs(object);
+	var isString = isObject && toStr.call(object) === '[object String]';
+	var theKeys = [];
+
+	if (!isObject && !isFunction && !isArguments) {
+		throw new TypeError('Object.keys called on a non-object');
+	}
+
+	var skipProto = hasProtoEnumBug && isFunction;
+	if (isString && object.length > 0 && !has.call(object, 0)) {
+		for (var i = 0; i < object.length; ++i) {
+			theKeys.push(String(i));
+		}
+	}
+
+	if (isArguments && object.length > 0) {
+		for (var j = 0; j < object.length; ++j) {
+			theKeys.push(String(j));
+		}
+	} else {
+		for (var name in object) {
+			if (!(skipProto && name === 'prototype') && has.call(object, name)) {
+				theKeys.push(String(name));
+			}
+		}
+	}
+
+	if (hasDontEnumBug) {
+		var skipConstructor = equalsConstructorPrototypeIfNotBuggy(object);
+
+		for (var k = 0; k < dontEnums.length; ++k) {
+			if (!(skipConstructor && dontEnums[k] === 'constructor') && has.call(object, dontEnums[k])) {
+				theKeys.push(dontEnums[k]);
+			}
+		}
+	}
+	return theKeys;
+};
+
+keysShim.shim = function shimObjectKeys() {
+	if (Object.keys) {
+		var keysWorksWithArguments = (function () {
+			// Safari 5.0 bug
+			return (Object.keys(arguments) || '').length === 2;
+		}(1, 2));
+		if (!keysWorksWithArguments) {
+			var originalKeys = Object.keys;
+			Object.keys = function keys(object) {
+				if (isArgs(object)) {
+					return originalKeys(slice.call(object));
+				} else {
+					return originalKeys(object);
+				}
+			};
+		}
+	} else {
+		Object.keys = keysShim;
+	}
+	return Object.keys || keysShim;
+};
+
+module.exports = keysShim;
+
+},{"./isArguments":250}],250:[function(require,module,exports){
+'use strict';
+
+var toStr = Object.prototype.toString;
+
+module.exports = function isArguments(value) {
+	var str = toStr.call(value);
+	var isArgs = str === '[object Arguments]';
+	if (!isArgs) {
+		isArgs = str !== '[object Array]' &&
+			value !== null &&
+			typeof value === 'object' &&
+			typeof value.length === 'number' &&
+			value.length >= 0 &&
+			toStr.call(value.callee) === '[object Function]';
+	}
+	return isArgs;
+};
+
+},{}],251:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -21072,7 +24589,7 @@ function base64DetectIncompleteChar(buffer) {
   this.charLength = this.charReceived ? 3 : 0;
 }
 
-},{"buffer":4}],229:[function(require,module,exports){
+},{"buffer":23}],252:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -21094,10 +24611,7 @@ function base64DetectIncompleteChar(buffer) {
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-'use strict';
-
 var punycode = require('punycode');
-var util = require('./util');
 
 exports.parse = urlParse;
 exports.resolve = urlResolve;
@@ -21128,9 +24642,6 @@ function Url() {
 var protocolPattern = /^([a-z0-9.+-]+:)/i,
     portPattern = /:[0-9]*$/,
 
-    // Special case for a simple path URL
-    simplePathPattern = /^(\/\/?(?!\/)[^\?\s]*)(\?[^\s]*)?$/,
-
     // RFC 2396: characters reserved for delimiting URLs.
     // We actually just auto-escape these.
     delims = ['<', '>', '"', '`', ' ', '\r', '\n', '\t'],
@@ -21147,8 +24658,8 @@ var protocolPattern = /^([a-z0-9.+-]+:)/i,
     nonHostChars = ['%', '/', '?', ';', '#'].concat(autoEscape),
     hostEndingChars = ['/', '?', '#'],
     hostnameMaxLen = 255,
-    hostnamePartPattern = /^[+a-z0-9A-Z_-]{0,63}$/,
-    hostnamePartStart = /^([+a-z0-9A-Z_-]{0,63})(.*)$/,
+    hostnamePartPattern = /^[a-z0-9A-Z_-]{0,63}$/,
+    hostnamePartStart = /^([a-z0-9A-Z_-]{0,63})(.*)$/,
     // protocols that can allow "unsafe" and "unwise" chars.
     unsafeProtocol = {
       'javascript': true,
@@ -21175,7 +24686,7 @@ var protocolPattern = /^([a-z0-9.+-]+:)/i,
     querystring = require('querystring');
 
 function urlParse(url, parseQueryString, slashesDenoteHost) {
-  if (url && util.isObject(url) && url instanceof Url) return url;
+  if (url && isObject(url) && url instanceof Url) return url;
 
   var u = new Url;
   u.parse(url, parseQueryString, slashesDenoteHost);
@@ -21183,48 +24694,15 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
 }
 
 Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
-  if (!util.isString(url)) {
+  if (!isString(url)) {
     throw new TypeError("Parameter 'url' must be a string, not " + typeof url);
   }
-
-  // Copy chrome, IE, opera backslash-handling behavior.
-  // Back slashes before the query string get converted to forward slashes
-  // See: https://code.google.com/p/chromium/issues/detail?id=25916
-  var queryIndex = url.indexOf('?'),
-      splitter =
-          (queryIndex !== -1 && queryIndex < url.indexOf('#')) ? '?' : '#',
-      uSplit = url.split(splitter),
-      slashRegex = /\\/g;
-  uSplit[0] = uSplit[0].replace(slashRegex, '/');
-  url = uSplit.join(splitter);
 
   var rest = url;
 
   // trim before proceeding.
   // This is to support parse stuff like "  http://foo.com  \n"
   rest = rest.trim();
-
-  if (!slashesDenoteHost && url.split('#').length === 1) {
-    // Try fast path regexp
-    var simplePath = simplePathPattern.exec(rest);
-    if (simplePath) {
-      this.path = rest;
-      this.href = rest;
-      this.pathname = simplePath[1];
-      if (simplePath[2]) {
-        this.search = simplePath[2];
-        if (parseQueryString) {
-          this.query = querystring.parse(this.search.substr(1));
-        } else {
-          this.query = this.search.substr(1);
-        }
-      } else if (parseQueryString) {
-        this.search = '';
-        this.query = {};
-      }
-      return this;
-    }
-  }
 
   var proto = protocolPattern.exec(rest);
   if (proto) {
@@ -21363,11 +24841,18 @@ Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
     }
 
     if (!ipv6Hostname) {
-      // IDNA Support: Returns a punycoded representation of "domain".
-      // It only converts parts of the domain name that
-      // have non-ASCII characters, i.e. it doesn't matter if
-      // you call it with a domain that already is ASCII-only.
-      this.hostname = punycode.toASCII(this.hostname);
+      // IDNA Support: Returns a puny coded representation of "domain".
+      // It only converts the part of the domain name that
+      // has non ASCII characters. I.e. it dosent matter if
+      // you call it with a domain that already is in ASCII.
+      var domainArray = this.hostname.split('.');
+      var newOut = [];
+      for (var i = 0; i < domainArray.length; ++i) {
+        var s = domainArray[i];
+        newOut.push(s.match(/[^A-Za-z0-9_-]/) ?
+            'xn--' + punycode.encode(s) : s);
+      }
+      this.hostname = newOut.join('.');
     }
 
     var p = this.port ? ':' + this.port : '';
@@ -21394,8 +24879,6 @@ Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
     // need to be.
     for (var i = 0, l = autoEscape.length; i < l; i++) {
       var ae = autoEscape[i];
-      if (rest.indexOf(ae) === -1)
-        continue;
       var esc = encodeURIComponent(ae);
       if (esc === ae) {
         esc = escape(ae);
@@ -21449,7 +24932,7 @@ function urlFormat(obj) {
   // If it's an obj, this is a no-op.
   // this way, you can call url_format() on strings
   // to clean up potentially wonky urls.
-  if (util.isString(obj)) obj = urlParse(obj);
+  if (isString(obj)) obj = urlParse(obj);
   if (!(obj instanceof Url)) return Url.prototype.format.call(obj);
   return obj.format();
 }
@@ -21480,7 +24963,7 @@ Url.prototype.format = function() {
   }
 
   if (this.query &&
-      util.isObject(this.query) &&
+      isObject(this.query) &&
       Object.keys(this.query).length) {
     query = querystring.stringify(this.query);
   }
@@ -21524,18 +25007,16 @@ function urlResolveObject(source, relative) {
 }
 
 Url.prototype.resolveObject = function(relative) {
-  if (util.isString(relative)) {
+  if (isString(relative)) {
     var rel = new Url();
     rel.parse(relative, false, true);
     relative = rel;
   }
 
   var result = new Url();
-  var tkeys = Object.keys(this);
-  for (var tk = 0; tk < tkeys.length; tk++) {
-    var tkey = tkeys[tk];
-    result[tkey] = this[tkey];
-  }
+  Object.keys(this).forEach(function(k) {
+    result[k] = this[k];
+  }, this);
 
   // hash is always overridden, no matter what.
   // even href="" will remove it.
@@ -21550,12 +25031,10 @@ Url.prototype.resolveObject = function(relative) {
   // hrefs like //foo/bar always cut to the protocol.
   if (relative.slashes && !relative.protocol) {
     // take everything except the protocol from relative
-    var rkeys = Object.keys(relative);
-    for (var rk = 0; rk < rkeys.length; rk++) {
-      var rkey = rkeys[rk];
-      if (rkey !== 'protocol')
-        result[rkey] = relative[rkey];
-    }
+    Object.keys(relative).forEach(function(k) {
+      if (k !== 'protocol')
+        result[k] = relative[k];
+    });
 
     //urlParse appends trailing / to urls like http://www.example.com
     if (slashedProtocol[result.protocol] &&
@@ -21577,11 +25056,9 @@ Url.prototype.resolveObject = function(relative) {
     // because that's known to be hostless.
     // anything else is assumed to be absolute.
     if (!slashedProtocol[relative.protocol]) {
-      var keys = Object.keys(relative);
-      for (var v = 0; v < keys.length; v++) {
-        var k = keys[v];
+      Object.keys(relative).forEach(function(k) {
         result[k] = relative[k];
-      }
+      });
       result.href = result.format();
       return result;
     }
@@ -21670,14 +25147,14 @@ Url.prototype.resolveObject = function(relative) {
     srcPath = srcPath.concat(relPath);
     result.search = relative.search;
     result.query = relative.query;
-  } else if (!util.isNullOrUndefined(relative.search)) {
+  } else if (!isNullOrUndefined(relative.search)) {
     // just pull out the search.
     // like href='?foo'.
     // Put this after the other two cases because it simplifies the booleans
     if (psychotic) {
       result.hostname = result.host = srcPath.shift();
       //occationaly the auth can get stuck only in host
-      //this especially happens in cases like
+      //this especialy happens in cases like
       //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
       var authInHost = result.host && result.host.indexOf('@') > 0 ?
                        result.host.split('@') : false;
@@ -21689,7 +25166,7 @@ Url.prototype.resolveObject = function(relative) {
     result.search = relative.search;
     result.query = relative.query;
     //to support http.request
-    if (!util.isNull(result.pathname) || !util.isNull(result.search)) {
+    if (!isNull(result.pathname) || !isNull(result.search)) {
       result.path = (result.pathname ? result.pathname : '') +
                     (result.search ? result.search : '');
     }
@@ -21716,15 +25193,15 @@ Url.prototype.resolveObject = function(relative) {
   // then it must NOT get a trailing slash.
   var last = srcPath.slice(-1)[0];
   var hasTrailingSlash = (
-      (result.host || relative.host || srcPath.length > 1) &&
-      (last === '.' || last === '..') || last === '');
+      (result.host || relative.host) && (last === '.' || last === '..') ||
+      last === '');
 
   // strip single dots, resolve double dots to parent dir
   // if the path tries to go above the root, `up` ends up > 0
   var up = 0;
   for (var i = srcPath.length; i >= 0; i--) {
     last = srcPath[i];
-    if (last === '.') {
+    if (last == '.') {
       srcPath.splice(i, 1);
     } else if (last === '..') {
       srcPath.splice(i, 1);
@@ -21759,7 +25236,7 @@ Url.prototype.resolveObject = function(relative) {
     result.hostname = result.host = isAbsolute ? '' :
                                     srcPath.length ? srcPath.shift() : '';
     //occationaly the auth can get stuck only in host
-    //this especially happens in cases like
+    //this especialy happens in cases like
     //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
     var authInHost = result.host && result.host.indexOf('@') > 0 ?
                      result.host.split('@') : false;
@@ -21783,7 +25260,7 @@ Url.prototype.resolveObject = function(relative) {
   }
 
   //to support request.http
-  if (!util.isNull(result.pathname) || !util.isNull(result.search)) {
+  if (!isNull(result.pathname) || !isNull(result.search)) {
     result.path = (result.pathname ? result.pathname : '') +
                   (result.search ? result.search : '');
   }
@@ -21806,32 +25283,29 @@ Url.prototype.parseHost = function() {
   if (host) this.hostname = host;
 };
 
-},{"./util":230,"punycode":205,"querystring":208}],230:[function(require,module,exports){
-'use strict';
+function isString(arg) {
+  return typeof arg === "string";
+}
 
-module.exports = {
-  isString: function(arg) {
-    return typeof(arg) === 'string';
-  },
-  isObject: function(arg) {
-    return typeof(arg) === 'object' && arg !== null;
-  },
-  isNull: function(arg) {
-    return arg === null;
-  },
-  isNullOrUndefined: function(arg) {
-    return arg == null;
-  }
-};
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
 
-},{}],231:[function(require,module,exports){
+function isNull(arg) {
+  return arg === null;
+}
+function isNullOrUndefined(arg) {
+  return  arg == null;
+}
+
+},{"punycode":224,"querystring":227}],253:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],232:[function(require,module,exports){
+},{}],254:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -22421,7 +25895,7 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":231,"_process":204,"inherits":201}],233:[function(require,module,exports){
+},{"./support/isBuffer":253,"_process":223,"inherits":220}],255:[function(require,module,exports){
 var indexOf = require('indexof');
 
 var Object_keys = function (obj) {
@@ -22561,18 +26035,9 @@ exports.createContext = Script.createContext = function (context) {
     return copy;
 };
 
-},{"indexof":234}],234:[function(require,module,exports){
-
-var indexOf = [].indexOf;
-
-module.exports = function(arr, obj){
-  if (indexOf) return arr.indexOf(obj);
-  for (var i = 0; i < arr.length; ++i) {
-    if (arr[i] === obj) return i;
-  }
-  return -1;
-};
-},{}],235:[function(require,module,exports){
+},{"indexof":256}],256:[function(require,module,exports){
+arguments[4][248][0].apply(exports,arguments)
+},{"dup":248}],257:[function(require,module,exports){
 module.exports = extend
 
 var hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -22593,3332 +26058,7 @@ function extend() {
     return target
 }
 
-},{}],236:[function(require,module,exports){
-/**
-* @module kad
-*/
-
-'use strict';
-
-var assert = require('assert');
-var async = require('async');
-var Node = require('./lib/node');
-
-/**
-* Creates a new K-Node and returns it
-* #createNode
-* @param {object} options
-* @param {function} onConnect
-*/
-module.exports = function createNode(options, onConnect) {
-  if (options.seeds) {
-    assert(Array.isArray(options.seeds), 'Invalid `options.seeds` supplied');
-  } else {
-    options.seeds = [];
-  }
-
-  for (var i = 0; i < options.seeds.length; i++) {
-    var seed = options.seeds[i];
-  }
-
-  var node = new Node(options);
-
-  async.eachSeries(options.seeds, connectToSeed, onConnect);
-
-  function connectToSeed(seed, done) {
-    node.connect(seed, done);
-  }
-
-  return node;
-};
-
-module.exports.Bucket = require('./lib/bucket');
-module.exports.Contact = require('./lib/contact');
-module.exports.Logger = require('./lib/logger');
-module.exports.Message = require('./lib/message');
-module.exports.Node = require('./lib/node');
-module.exports.Router = require('./lib/router');
-module.exports.RPC = require('./lib/rpc');
-module.exports.transports = require('./lib/transports');
-module.exports.utils = require('./lib/utils');
-module.exports.constants = require('./lib/constants');
-
-},{"./lib/bucket":237,"./lib/constants":238,"./lib/contact":239,"./lib/logger":243,"./lib/message":244,"./lib/node":245,"./lib/router":246,"./lib/rpc":247,"./lib/transports":249,"./lib/utils":253,"assert":2,"async":254}],237:[function(require,module,exports){
-/**
-* @module kad/bucket
-*/
-
-'use strict';
-
-var _ = require('lodash');
-var assert = require('assert');
-var constants = require('./constants');
-var Contact = require('./contact');
-
-/**
-* Represents a contact bucket
-* @constructor
-*/
-function Bucket() {
-  if (!(this instanceof Bucket)) {
-    return new Bucket();
-  }
-
-  this._contacts = [];
-}
-
-/**
-* Return the number of contacts in this bucket
-* #getSize
-*/
-Bucket.prototype.getSize = function() {
-  return this._contacts.length;
-};
-
-/**
-* Return the list of contacts in this bucket
-* #getContactList
-*/
-Bucket.prototype.getContactList = function() {
-  return _.clone(this._contacts);
-};
-
-/**
-* Return the contact at the given index
-* #getContact
-* @param {number} index
-*/
-Bucket.prototype.getContact = function(index) {
-  assert(index >= 0, 'Contact index cannot be negative');
-  assert(index < constants.B, 'Contact index cannot be greater than `B`');
-
-  return this._contacts[index] || null;
-};
-
-/**
-* Adds the contact to the bucket
-* #addContact
-* @param {object} contact
-*/
-Bucket.prototype.addContact = function(contact) {
-  assert(contact instanceof Contact, 'Invalid contact supplied');
-
-  if (!this.hasContact(contact.nodeID)) {
-    var index = _.sortedIndex(this._contacts, contact, function(contact) {
-      return contact.lastSeen;
-    });
-
-    this._contacts.splice(index, 0, contact);
-  }
-
-  return this;
-};
-
-/**
-* Removes the contact from the bucket
-* #removeContact
-* @param {object} contact
-*/
-Bucket.prototype.removeContact = function(contact) {
-  var index = this.indexOf(contact);
-
-  if (index >= 0) {
-    this._contacts.splice(index, 1);
-  }
-
-  return this;
-};
-
-/**
-* Returns boolean indicating that the nodeID is contained in the bucket
-* #hasContact
-* @param {string} nodeID
-*/
-Bucket.prototype.hasContact = function(nodeID) {
-  for (var i = 0; i < this.getSize(); i++) {
-    if (this._contacts[i].nodeID === nodeID) {
-      return true;
-    }
-  }
-
-  return false;
-};
-
-/**
-* Returns the index of the given contact
-* #indexOf
-* @param {object} contact
-*/
-Bucket.prototype.indexOf = function(contact) {
-  assert(contact instanceof Contact, 'Invalid contact supplied');
-
-  for (var i = 0; i < this.getSize(); i++) {
-    if (this.getContact(i).nodeID === contact.nodeID) {
-      return i;
-    }
-  }
-
-  return -1;
-};
-
-module.exports = Bucket;
-
-},{"./constants":238,"./contact":239,"assert":2,"lodash":267}],238:[function(require,module,exports){
-/**
-* @module kad/constants
-*/
-
-'use strict';
-
-var ms = require('ms');
-
-/**
-* Protocol constants
-* #exports
-* @see http://xlattice.sourceforge.net/components/protocol/kademlia/specs.html#constants
-*/
-module.exports = {
-
-  ALPHA: 3,
-  B: 160,
-  K: 20,
-
-  T_REFRESH: ms('3600s'),
-  T_REPLICATE: ms('3600s'),
-  T_REPUBLISH: ms('86400s'),
-
-  // T_EXPIRE is 5s higher than protocol spec to avoid republish race condition
-  T_EXPIRE: ms('86405s'),
-
-  T_RESPONSETIMEOUT: ms('5s'),
-
-  MESSAGE_TYPES: [
-    'PING',
-    'PONG',
-    'STORE',
-    'STORE_REPLY',
-    'FIND_NODE',
-    'FIND_NODE_REPLY',
-    'FIND_VALUE',
-    'FIND_VALUE_REPLY'
-  ]
-
-};
-
-},{"ms":269}],239:[function(require,module,exports){
-/**
-* @module kad/contact
-*/
-
-'use strict';
-
-var assert = require('assert');
-var utils = require('./utils');
-
-/**
-* Represent a contact (or peer)
-* @constructor
-* @param {object} options
-*/
-function Contact(options) {
-
-  assert(this instanceof Contact, 'Invalid instance was supplied');
-  assert(options instanceof Object, 'Invalid options were supplied');
-
-  Object.defineProperty(this, 'nodeID', {
-    value: options.nodeID || this._createNodeID(),
-    configurable: false,
-    enumerable: true
-  });
-
-  assert(utils.isValidKey(this.nodeID), 'Invalid nodeID was supplied');
-
-  this.seen();
-}
-
-/**
-* Updates the lastSeen property to right now
-* #seen
-*/
-Contact.prototype.seen = function() {
-  this.lastSeen = Date.now();
-};
-
-/* istanbul ignore next */
-/**
-* Unimplemented stub, called when no nodeID is passed to constructor.
-* #_createNodeID
-*/
-Contact.prototype._createNodeID = function() {
-  throw new Error('Method not implemented');
-};
-
-module.exports = Contact;
-
-},{"./utils":253,"assert":2}],240:[function(require,module,exports){
-/**
-* @module kad/contact
-*/
-
-'use strict';
-
-var assert = require('assert');
-var Contact = require('../contact');
-var inherits = require('util').inherits;
-var utils = require('../utils');
-
-inherits(AddressPortContact, Contact);
-
-/**
-* Represent a contact (or peer)
-* @constructor
-* @param {object} options
-*/
-function AddressPortContact(options) {
-
-  if (!(this instanceof AddressPortContact)) {
-    return new AddressPortContact(options);
-  }
-
-  assert(options instanceof Object, 'Invalid options were supplied');
-  assert(typeof options.address === 'string', 'Invalid address was supplied');
-  assert(typeof options.port === 'number', 'Invalid port was supplied');
-
-  this.address = options.address;
-  this.port = options.port;
-
-  Contact.call(this, options)
-}
-
-/**
-* Generate a NodeID by taking the SHA1 hash of the address and port
-* #_createNodeID
-*/
-AddressPortContact.prototype._createNodeID = function() {
-  return utils.createID(this.toString());
-};
-
-/**
-* Generate a user-friendly string for the contact
-* #_toString
-*/
-AddressPortContact.prototype.toString = function() {
-  return this.address + ':' + this.port;
-};
-
-module.exports = AddressPortContact;
-
-},{"../contact":239,"../utils":253,"assert":2,"util":232}],241:[function(require,module,exports){
-/**
-* @module kad/peer-contact
-*/
-
-'use strict';
-
-var assert = require('assert');
-var Contact = require('../contact.js');
-var inherits = require('util').inherits;
-var utils = require('../utils');
-
-inherits(WebRTCContact, Contact);
-
-/**
-* Represent a WebRTC contact
-* @constructor
-* @param {object} options
-*/
-function WebRTCContact(options) {
-  if (!(this instanceof WebRTCContact)) {
-    return new WebRTCContact(options);
-  }
-
-  assert(options instanceof Object, 'Invalid options were supplied');
-  assert(typeof options.nick === 'string', 'Invalid nick was supplied');
-
-  this.nick = options.nick;
-
-  Contact.call(this, options);
-}
-
-/**
-* Generate a NodeID by taking the SHA1 hash of the nickname
-* #_createNodeID
-*/
-WebRTCContact.prototype._createNodeID = function() {
-  return utils.createID(this.nick);
-};
-
-/**
-* Generate a user-friendly string for the contact
-* #_toString
-*/
-WebRTCContact.prototype.toString = function() {
-  return this.nick;
-};
-
-module.exports = WebRTCContact;
-
-},{"../contact.js":239,"../utils":253,"assert":2,"util":232}],242:[function(require,module,exports){
-/**
-* @module kad/item
-*/
-
-'use strict';
-
-var assert = require('assert');
-var constants = require('./constants');
-var utils = require('./utils');
-
-/**
-* Represents an item to store
-* @constructor
-* @param {string} key
-* @param {object} value
-* @param {string} publisher - nodeID
-* @param {number} timestamp - optional
-*/
-function Item(key, value, publisher, timestamp) {
-  if (!(this instanceof Item)) {
-    return new Item(key, value, publisher, timestamp);
-  }
-
-  assert.ok(typeof key === 'string', 'Invalid key supplied');
-  assert.ok(value, 'Invalid value supplied');
-  assert(utils.isValidKey(publisher), 'Invalid publisher nodeID supplied');
-
-  if (timestamp) {
-    assert(typeof timestamp === 'number', 'Invalid timestamp supplied');
-    assert(Date.now() >= timestamp, 'Timestamp cannot be in the future');
-  }
-
-  this.key = key;
-  this.value = value;
-  this.publisher = publisher;
-  this.timestamp = timestamp || Date.now();
-}
-
-module.exports = Item;
-
-},{"./constants":238,"./utils":253,"assert":2}],243:[function(require,module,exports){
-/**
-* @module kad/logger
-*/
-
-'use strict';
-
-var colors = require('colors/safe');
-
-/**
-* Handles logging to console
-* @constructor
-*/
-function Logger(level) {
-  if (!(this instanceof Logger)) {
-    return new Logger(level);
-  }
-
-  this.level = level || 0;
-  this.types = {
-    debug: {
-      level: 4,
-      color: colors.magenta
-    },
-    info: {
-      level: 3,
-      color: colors.blue
-    },
-    warn: {
-      level: 2,
-      color: colors.yellow
-    },
-    error: {
-      level: 1,
-      color: colors.red
-    }
-  };
-
-  this._bindLogTypes();
-}
-
-/**
-* Sets up log types as instance methods
-* #_bindLogTypes
-*/
-Logger.prototype._bindLogTypes = function() {
-  var self = this;
-
-  Object.keys(this.types).forEach(function(type) {
-    self[type] = function() {
-      if (self.level >= self.types[type].level) {
-        var prefix = self.types[type].color('{' + type + '}');
-        var args = Array.prototype.slice.call(arguments);
-
-        args[0] = prefix + ' ' + args[0];
-
-        console.log.apply(console, args);
-      }
-    }
-  });
-};
-
-module.exports = Logger;
-
-},{"colors/safe":265}],244:[function(require,module,exports){
-(function (Buffer){
-/**
-* @module kad/message
-*/
-
-'use strict';
-
-var assert = require('assert');
-var constants = require('./constants');
-var merge = require('merge');
-var Contact = require('./contact');
-
-/**
-* Represents a message to be sent over RPC
-* @constructor
-* @param {string} type
-* @param {object} params
-* @param {object} fromContact
-*/
-function Message(type, params, fromContact) {
-  if (!(this instanceof Message)) {
-    return new Message(type, params, fromContact);
-  }
-
-  assert(constants.MESSAGE_TYPES.indexOf(type) !== -1, 'Invalid message type');
-  assert(fromContact instanceof Contact, 'Invalid contact supplied');
-
-  this.type = type;
-  this.params = merge(params, fromContact);
-}
-
-/**
-* Serialize message to a Buffer
-* #serialize
-*/
-Message.prototype.serialize = function() {
-  return new Buffer(JSON.stringify(this), 'utf8');
-};
-
-module.exports = Message;
-
-}).call(this,require("buffer").Buffer)
-},{"./constants":238,"./contact":239,"assert":2,"buffer":4,"merge":268}],245:[function(require,module,exports){
-/**
-* @module kademlia/node
-*/
-
-'use strict';
-
-var merge = require('merge');
-var assert = require('assert');
-var _ = require('lodash');
-var async = require('async');
-var inherits = require('util').inherits;
-var utils = require('./utils');
-var events = require('events');
-var dgram = require('dgram');
-var constants = require('./constants');
-var Bucket = require('./bucket');
-var Contact = require('./contact');
-var Router = require('./router');
-var Message = require('./message');
-var Item = require('./item');
-var Logger = require('./logger');
-var transports = require('./transports');
-
-inherits(Node, events.EventEmitter);
-
-Node.DEFAULTS = {
-  transport: transports.UDP
-};
-
-/**
-* Represents a Kademlia node
-* @constructor
-* @param {object} options
-*/
-function Node(options) {
-  if (!(this instanceof Node)) {
-    return new Node(options);
-  }
-
-  events.EventEmitter.call(this);
-
-  this._options = merge(Object.create(Node.DEFAULTS), options);
-  this._storage = options.storage;
-
-  assert(typeof this._storage === 'object', 'No storage adapter supplied');
-  assert(typeof this._storage.get === 'function', 'Store has no `get` method');
-  assert(typeof this._storage.put === 'function', 'Store has no `put` method');
-  assert(typeof this._storage.del === 'function', 'Store has no `del` method');
-  assert(
-    typeof this._storage.createReadStream === 'function',
-    'Store has no `createReadStream` method'
-  );
-
-  this._buckets = {};
-  this._log = new Logger(options.logLevel);
-  this._rpc = new this._options.transport(options);
-  this._self = this._rpc._contact;
-
-  this._bindRPCMessageHandlers();
-  this._startReplicationInterval();
-  this._startExpirationInterval();
-
-  this._log.debug('node created with nodeID %s', this._self.nodeID);
-}
-
-/**
-* Connects to the overlay network
-* #connect
-* @param {string} options transport-specific contact options
-* @param {function} callback - optional
-*/
-Node.prototype.connect = function(options, callback) {
-  if (callback) {
-    this.once('connect', callback);
-    this.once('error', callback);
-  }
-
-  var self = this;
-  var seed = this._rpc._createContact(options);
-
-  this._log.debug('entering overlay network via %j', seed);
-
-  async.waterfall([
-    this._updateContact.bind(this, seed),
-    this._findNode.bind(this, this._self.nodeID),
-    this._refreshBucketsBeyondClosest.bind(this)
-  ], function(err) {
-    if (err) {
-      return self.emit('error', err);
-    }
-
-    self.emit('connect');
-  });
-
-  return this;
-};
-
-/**
-* Validate a key/value pair (defaults to always valid).
-* #validateKeyValuePair
-* @param {string} key
-* @param {mixed} value
-* @param {function} callback
-*/
-Node.prototype.validateKeyValuePair = function(key, value, callback) {
-  if(this._options.validateKeyValuePair) {
-    return this._options.validateKeyValuePair.apply(this, arguments);
-  }
-  callback(true);
-};
-
-/**
-* Set a key/value pair in the DHT
-* #set
-* @param {string} key
-* @param {mixed} value
-* @param {function} callback
-*/
-Node.prototype.put = function(key, value, callback) {
-  var node = this;
-
-  this._log.debug('attempting to set value for key %s', key);
-
-  this.validateKeyValuePair(key, value, function(isValid) {
-    if(!isValid) {
-      node._log.warn('failed to validate key/value pair for %s', key);
-      return callback(new Error('Failed to validate key/value pair'));
-    }
-
-    node._putValidatedKeyValue(key, value, callback);
-  });
-};
-
-/**
-* Set a validated key/value pair in the DHT
-* #set
-* @param {string} key
-* @param {mixed} value
-* @param {function} callback
-*/
-Node.prototype._putValidatedKeyValue = function(key, value, callback) {
-  var node = this;
-  var item = new Item(key, value, this._self.nodeID);
-  var message = new Message('STORE', item, this._self);
-
-  this._findNode(item.key, function(err, contacts) {
-    if (err) {
-      node._log.error('failed to find nodes - reason: %s', err.message);
-      return callback(err);
-    }
-
-    if (contacts.length === 0) {
-      node._log.error('no contacts are available');
-      contacts = node._getNearestContacts(key, constants.K, node._self.nodeID);
-    }
-
-    node._log.debug('found %d contacts for STORE operation', contacts.length);
-
-    async.each(contacts, function(contact, done) {
-      node._log.debug('sending STORE message to %j', contact);
-      node._rpc.send(contact, message, done);
-    }, callback);
-  });
-};
-
-/**
-* Get a value by it's key from the DHT
-* #get
-* @param {string} key
-* @param {function} callback
-*/
-Node.prototype.get = function(key, callback) {
-  var self = this;
-
-  this._log.debug('attempting to get value for key %s', key);
-
-  this._storage.get(key, function(err, value) {
-    if (!err && value) {
-      return callback(null, JSON.parse(value).value);
-    }
-
-    self._findValue(key, function(err, value) {
-      if (err) {
-        return callback(err);
-      }
-
-      callback(null, value);
-    });
-
-  });
-};
-
-/**
-* Setup event listeners for rpc messages
-* #_bindRPCMessageHandlers
-*/
-Node.prototype._bindRPCMessageHandlers = function() {
-  var self = this;
-
-  this._rpc.on('PING', this._handlePing.bind(this));
-  this._rpc.on('STORE', this._handleStore.bind(this));
-  this._rpc.on('FIND_NODE', this._handleFindNode.bind(this));
-  this._rpc.on('FIND_VALUE', this._handleFindValue.bind(this));
-  this._rpc.on('CONTACT_SEEN', this._updateContact.bind(this));
-
-  this._rpc.on('ready', function() {
-    self._log.debug('node listening on %j', self._self.toString());
-  });
-};
-
-/**
-* Replicate local storage every T_REPLICATE
-* #_startReplicationInterval
-*/
-Node.prototype._startReplicationInterval = function() {
-  setInterval(this._replicate.bind(this), constants.T_REPLICATE);
-};
-
-/**
-* Replicate local storage
-* #_replicate
-*/
-Node.prototype._replicate = function() {
-  var self = this;
-  var stream = this._storage.createReadStream();
-
-  this._log.info('starting local database replication');
-
-  stream.on('data', function(data) {
-    if (typeof data.value === 'string') {
-      try {
-        data.value = JSON.parse(data.value);
-      } catch(err) {
-        return self._log.error('failed to parse value from %s', data.value);
-      }
-    }
-
-    // if we are not the publisher, then replicate every T_REPLICATE
-    if (data.value.publisher !== self._self.nodeID) {
-      self.put(data.key, data.value.value, function(err) {
-        if (err) {
-          self._log.error('failed to replicate item at key %s', data.key);
-        }
-      });
-    // if we are the publisher, then only replicate every T_REPUBLISH
-    } else if (Date.now() <= data.value.timestamp + constants.T_REPUBLISH) {
-      self.put(data.key, data.value.value, function(err) {
-        if (err) {
-          self._log.error('failed to republish item at key %s', data.key);
-        }
-      });
-    }
-  });
-
-  stream.on('error', function(err) {
-    self._log.error('error while replicating: %s', err.message);
-  });
-
-  stream.on('end', function() {
-    self._log.info('database replication complete');
-  });
-};
-
-/**
-* Expire entries older than T_EXPIRE
-* #_startExpirationInterval
-*/
-Node.prototype._startExpirationInterval = function() {
-  setInterval(this._expire.bind(this), constants.T_EXPIRE);
-};
-
-/**
-* Expire entries older than T_EXPIRE
-* #_expire
-*/
-Node.prototype._expire = function() {
-  var self = this;
-  var stream = this._storage.createReadStream();
-
-  this._log.info('starting local database expiration');
-
-  stream.on('data', function(data) {
-    if (Date.now() <= data.value.timestamp + constants.T_EXPIRE) {
-      self._storage.del(data.key, function(err) {
-        if (err) {
-          self._log.error('failed to expire item at key %s', data.key);
-        }
-      });
-    }
-  });
-
-  stream.on('error', function(err) {
-    self._log.error('error while expiring: %s', err.message);
-  });
-
-  stream.on('end', function() {
-    self._log.info('database expiration complete');
-  });
-};
-
-/**
-* Refreshes the buckets farther than the closest known
-* #_refreshBucketsBeyondClosest
-* @param {string} type
-* @param {array} contacts
-* @param {function} done
-*/
-Node.prototype._refreshBucketsBeyondClosest = function(contacts, done) {
-  var bucketIndexes = Object.keys(this._buckets);
-  var leastBucket = _.min(bucketIndexes);
-  var refreshBuckets = bucketIndexes.filter(bucketFilter);
-  var queue = async.queue(this._refreshBucket.bind(this), 1);
-
-  this._log.debug('refreshing buckets farthest than closest known');
-
-  refreshBuckets.forEach(function(index) {
-    queue.push(index);
-  });
-
-  function bucketFilter(index) {
-    return index >= leastBucket;
-  }
-
-  done();
-};
-
-/**
-* Refreshes the bucket at the given index
-* #_refreshBucket
-* @param {number} index
-* @param {function} callback
-*/
-Node.prototype._refreshBucket = function(index, callback) {
-  var random = utils.getRandomInBucketRangeBuffer(index);
-
-  this._findNode(random.toString('hex'), callback);
-};
-
-/**
-* Search contacts for the value at given key
-* #_findValue
-* @param {string} key
-* @param {function} callback
-*/
-Node.prototype._findValue = function(key, callback) {
-  var self = this;
-
-  this._log.debug('searching for value at key %s', key);
-
-  this._find(key, 'VALUE', function(err, type, value) {
-    if (err || type === 'NODE') {
-      return callback(new Error('Failed to find value for key: ' + key));
-    }
-
-    self._log.debug('found value for key %s', key);
-
-    callback(null, value);
-  });
-};
-
-/**
-* Search contacts for nodes close to the given key
-* #_findNode
-* @param {string} nodeID
-* @param {function} callback
-*/
-Node.prototype._findNode = function(nodeID, callback) {
-  var self = this;
-
-  this._log.debug('searching for nodes close to key %s', nodeID);
-
-  this._find(nodeID, 'NODE', function(err, type, contacts) {
-    if (err) {
-      return callback(err);
-    }
-
-    self._log.debug('found %d nodes close to key %s', contacts.length, nodeID);
-
-    callback(null, contacts);
-  });
-};
-
-/**
-* Search contacts for nodes/values
-* #_find
-* @param {string} key
-* @param {string} type - ['NODE', 'VALUE']
-* @param {function} callback
-*/
-Node.prototype._find = function(key, type, callback) {
-  Router(type, key, this).route(callback);
-};
-
-/**
-* Update the contact's status
-* #_updateContact
-* @param {object} contact
-* @param {function} callback - optional
-*/
-Node.prototype._updateContact = function(contact, callback) {
-  assert(contact instanceof Contact, 'Invalid contact supplied');
-
-  this._log.debug('updating contact %j', contact);
-
-  var self = this;
-  var bucketIndex = utils.getBucketIndex(this._self.nodeID, contact.nodeID);
-
-  assert(bucketIndex < constants.B);
-
-  if (!this._buckets[bucketIndex]) {
-    this._log.debug('creating new bucket for contact at index %d', bucketIndex);
-    this._buckets[bucketIndex] = new Bucket();
-  }
-
-  var bucket = this._buckets[bucketIndex];
-  var inBucket = bucket.hasContact(contact.nodeID);
-  var bucketHasRoom = bucket.getSize() < constants.K;
-  var contactAtHead = bucket.getContact(0);
-  var pingMessage = new Message('PING', {}, this._self);
-
-  contact.seen();
-
-  if (inBucket) {
-    this._log.debug('contact already in bucket, moving to tail');
-    bucket.removeContact(contact);
-    bucket.addContact(contact);
-    complete();
-  } else if (bucketHasRoom) {
-    this._log.debug('contact not in bucket, moving to head');
-    bucket.addContact(contact);
-    complete();
-  } else {
-    this._log.debug('no room in bucket, sending PING to contact at head');
-    this._rpc.send(contactAtHead, pingMessage, function(err) {
-      if (err) {
-        self._log.debug('head contact did not respond, replacing with new');
-        bucket.removeContact(contactAtHead);
-        bucket.addContact(contact);
-      }
-
-      complete();
-    });
-  }
-
-  function complete() {
-    if (typeof callback === 'function') {
-      callback();
-    }
-  }
-
-  return contact;
-};
-
-/**
-* Handle `PING` RPC
-* #_handlePing
-* @param {object} params
-*/
-Node.prototype._handlePing = function(params) {
-  var contact = this._rpc._createContact(params);
-  var message = new Message('PONG', { referenceID: params.rpcID }, this._self);
-
-  this._log.info('received PING from %s, sending PONG', params.nodeID);
-  this._rpc.send(contact, message);
-};
-
-/**
-* Handle `STORE` RPC
-* #_handleStore
-* @param {object} params
-*/
-Node.prototype._handleStore = function(params) {
-  var node = this;
-  var item;
-
-  try {
-    item = new Item(params.key, params.value, params.nodeID);
-  } catch(err) {
-    return;
-  }
-
-  this._log.info('received valid STORE from %s', params.nodeID);
-
-  this.validateKeyValuePair(item.key, params.value, function(isValid) {
-    if(!isValid) {
-      node._log.warn('failed to validate key/value pair for %s', item.key);
-      return;
-    }
-
-    node._storeValidatedKeyValue(item, params);
-  });
-};
-
-/**
-* Add the validated ke/value to storage
-* #_storeValidatedKeyValue
-* @param {object} item
-* @param {object} params
-*/
-Node.prototype._storeValidatedKeyValue = function(item, params) {
-  var node = this;
-  this._storage.put(item.key, JSON.stringify(item), function(err) {
-    var contact = node._rpc._createContact(params);
-    var message = new Message('STORE_REPLY', {
-      referenceID: params.rpcID,
-      success: !!err
-    }, node._self);
-
-    node._log.debug('successful store, notifying %s', params.nodeID);
-    node._rpc.send(contact, message);
-  });
-};
-
-/**
-* Handle `FIND_NODE` RPC
-* #_handleFindNode
-* @param {object} params
-*/
-Node.prototype._handleFindNode = function(params) {
-  this._log.info('received FIND_NODE from %j', params);
-
-  var contact = this._rpc._createContact(params);
-  var near = this._getNearestContacts(params.key, constants.K, params.nodeID);
-  var message = new Message('FIND_NODE_REPLY', {
-    referenceID: params.rpcID,
-    contacts: near
-  }, this._self);
-
-  this._log.debug('sending %s nearest %d contacts', params.nodeID, near.length);
-  this._rpc.send(contact, message);
-};
-
-/**
-* Handle `FIND_VALUE` RPC
-* #_handleFindValue
-* @param {object} params
-*/
-Node.prototype._handleFindValue = function(params) {
-  var node = this;
-  var contact = this._rpc._createContact(params);
-  var limit = constants.K;
-
-  this._log.info('received valid FIND_VALUE from %s', params.nodeID);
-
-  this._storage.get(params.key, function(err, value) {
-    if (err || !value) {
-      node._log.debug('value not found, sending contacts to %s', params.nodeID);
-
-      var notFoundMessage = new Message('FIND_VALUE_REPLY', {
-        referenceID: params.rpcID,
-        contacts: node._getNearestContacts(params.key, limit, params.nodeID)
-      }, node._self);
-
-      return node._rpc.send(contact, notFoundMessage);
-    }
-
-    node._log.debug('found value, sending to %s', params.nodeID);
-
-    var foundMessage = new Message('FIND_VALUE_REPLY', {
-      referenceID: params.rpcID,
-      value: value
-    }, contact);
-
-    node._rpc.send(contact, foundMessage);
-  });
-};
-
-/**
-* Return contacts closest to the given key
-* #_getNearestContacts
-* @param {string} key
-* @param {number} limit
-* @param {string} nodeID
-*/
-Node.prototype._getNearestContacts = function(key, limit, nodeID) {
-  var contacts = [];
-  var hashedKey = utils.createID(key);
-  var initialIndex = utils.getBucketIndex(this._self.nodeID, hashedKey);
-  var ascBucketIndex = initialIndex;
-  var descBucketIndex = initialIndex;
-
-  if (this._buckets[initialIndex]) {
-    addNearestFromBucket(this._buckets[initialIndex]);
-  }
-
-  while (contacts.length < limit && ascBucketIndex < constants.B) {
-    ascBucketIndex++;
-
-    if (this._buckets[ascBucketIndex]) {
-      addNearestFromBucket(this._buckets[ascBucketIndex]);
-    }
-  }
-
-  while (contacts.length < limit && descBucketIndex >= 0) {
-    descBucketIndex--;
-
-    if (this._buckets[descBucketIndex]) {
-      addNearestFromBucket(this._buckets[descBucketIndex]);
-    }
-  }
-
-  function addToContacts(contact) {
-    var isContact = contact instanceof Contact;
-    var poolNotFull = contacts.length < limit;
-    var notRequester = contact.nodeID !== nodeID;
-
-    if (isContact && poolNotFull && notRequester) {
-      contacts.push(contact);
-    }
-  }
-
-  function addNearestFromBucket(bucket) {
-    var contactList = bucket.getContactList();
-    var distances = contactList.map(addDistance).sort(sortKeysByDistance);
-    var howMany = limit - contacts.length;
-
-    distances.splice(0, howMany).map(pluckContact).forEach(addToContacts);
-  }
-
-  function pluckContact(c) {
-    return c.contact;
-  }
-
-  function sortKeysByDistance(a, b) {
-    return utils.compareKeys(a.distance, b.distance);
-  }
-
-  function addDistance(contact) {
-    return {
-      contact: contact,
-      distance: utils.getDistance(contact.nodeID, hashedKey)
-    };
-  }
-
-  return contacts;
-};
-
-module.exports = Node;
-
-},{"./bucket":237,"./constants":238,"./contact":239,"./item":242,"./logger":243,"./message":244,"./router":246,"./transports":249,"./utils":253,"assert":2,"async":254,"dgram":1,"events":200,"lodash":267,"merge":268,"util":232}],246:[function(require,module,exports){
-/**
-* @module kad/router
-*/
-
-'use strict';
-
-var assert = require('assert');
-var async = require('async');
-var _ = require('lodash');
-var constants = require('./constants');
-var utils = require('./utils');
-var Message = require('./message');
-var Contact = require('./contact');
-
-/**
-* Represents a router for finding nodes and values
-* @constructor
-* @param {string} type - ['NODE','VALUE']
-* @param {string} key - key to find close nodes/value
-* @param {object} node - the node executing the route
-*/
-function Router(type, key, node) {
-  if (!(this instanceof Router)) {
-    return new Router(type, key, node);
-  }
-
-  assert(['NODE', 'VALUE'].indexOf(type) !== -1, 'Invalid search type');
-
-  this.node = node;
-  this.type = type;
-  this.key = key;
-  this.hashedKey = utils.createID(key);
-
-  this.limit = constants.ALPHA;
-  this.shortlist = node._getNearestContacts(key, this.limit, node._self.nodeID);
-  this.closestNode = this.shortlist[0];
-  this.previousClosestNode = null;
-  this.contacted = {};
-  this.foundValue = false;
-  this.value = null;
-  this.contactsWithoutValue = [];
-}
-
-/**
-* Execute this router's find operation with the shortlist
-* #route
-* @param {function} callback
-*/
-Router.prototype.route = function(callback) {
-  if (!this.closestNode) {
-    return callback(new Error('Not connected to any peers'));
-  }
-
-  this.closestNodeDistance = utils.getDistance(
-    this.hashedKey,
-    this.closestNode.nodeID
-  );
-
-  this.message = new Message('FIND_' + this.type, {
-    key: this.key
-  }, this.node._self);
-
-  this._iterativeFind(this.shortlist, callback);
-};
-
-/**
-* Execute the find operation for this router type
-* #iterativeFind
-* @param {array} contacts
-* @param {function} callback
-*/
-Router.prototype._iterativeFind = function(contacts, callback) {
-  var self = this;
-
-  async.each(contacts, this._queryContact.bind(this), function(err) {
-    self._handleQueryResults(callback);
-  });
-};
-
-/**
-* Send this router's RPC message to the contact
-* #_queryContact
-* @param {object} contactInfo
-* @param {function} callback
-*/
-Router.prototype._queryContact = function(contactInfo, callback) {
-  var self = this;
-  var contact = this.node._rpc._createContact(contactInfo);
-
-  this.node._rpc.send(contact, this.message, function(err, params) {
-    if (err) {
-      self._removeFromShortList(contact.nodeID);
-      return callback();
-    }
-
-    self._handleFindResult(params, contact, callback);
-  });
-};
-
-/**
-* Handle the results of the contact query
-* #_handleFindResult
-* @param {object} params - message response params
-* @param {object} contact
-* @param {function} callback
-*/
-Router.prototype._handleFindResult = function(params, contact, callback) {
-  var self = this;
-  var distance = utils.getDistance(this.hashedKey, contact.nodeID);
-
-  this.contacted[contact.nodeID] = this.node._updateContact(contact);
-
-  if (utils.compareKeys(distance, this.closestNodeDistance) === -1) {
-    this.previousClosestNode = this.closestNode;
-    this.closestNode = contact;
-    this.closestNodeDistance = distance;
-  }
-
-  if(this.type === 'NODE') {
-    this._addToShortList(params.contacts);
-    return callback();
-  }
-
-  if(!params.value) {
-    this.contactsWithoutValue.push(contact);
-    this._addToShortList(params.contacts);
-    return callback();
-  }
-
-  var parsedValue;
-  try {
-    parsedValue = JSON.parse(params.value).value;
-  } catch(err) {
-    this.node._log.warn('failed to parse value %s', params.value);
-    return rejectContact();
-  }
-
-  this.node.validateKeyValuePair(this.key, parsedValue, function(isValid) {
-    if(!isValid) {
-      self.node._log.warn('failed to validate key/value pair for %s', self.key);
-      return rejectContact();
-    }
-
-    self.foundValue = true;
-    self.value = parsedValue;
-    callback();
-  });
-
-  function rejectContact() {
-    self._removeFromShortList(contact.nodeID);
-    callback();
-  }
-};
-
-/**
-* Add contacts to the shortlist, preserving nodeID uniqueness
-* #_addToShortList
-* @param {array} contacts
-*/
-Router.prototype._addToShortList = function(contacts) {
-  assert(Array.isArray(contacts), 'No contacts supplied');
-  this.shortlist = this.shortlist.concat(contacts);
-  this.shortlist = _.uniq(this.shortlist, false, 'nodeID');
-};
-
-/**
-* Remove contacts with the nodeID from the shortlist
-* #_removeFromShortList
-* @param {string} nodeID
-*/
-Router.prototype._removeFromShortList = function(nodeID) {
-  this.shortlist = _.reject(this.shortlist, function(c) {
-    return c.nodeID === nodeID;
-  });
-};
-
-/**
-* Handle the results of all the executed queries
-* #_handleQueryResults
-* @param {function} callback
-*/
-Router.prototype._handleQueryResults = function(callback) {
-  var self = this;
-
-  if (this.foundValue) {
-    return this._handleValueReturned(callback);
-  }
-
-  var closestNodeUnchanged = this.closestNode === this.previousClosestNode;
-  var shortlistFull = this.shortlist.length >= constants.K;
-
-  if (closestNodeUnchanged || shortlistFull) {
-    return callback(null, 'NODE', this.shortlist);
-  }
-
-  var remainingContacts = _.reject(this.shortlist, function(c) {
-    return self.contacted[c.nodeID];
-  });
-
-  if (remainingContacts.length === 0) {
-    callback(null, 'NODE', this.shortlist);
-  } else {
-    this._iterativeFind(remainingContacts.splice(0, constants.ALPHA), callback);
-  }
-};
-
-/**
-* Handle a value being returned and store at closest nodes that didn't have it
-* #_handleValueReturned
-* @param {function} callback
-*/
-Router.prototype._handleValueReturned = function(callback) {
-  var self = this;
-
-  var distances = this.contactsWithoutValue.map(function(contact) {
-    return {
-      distance: utils.getDistance(contact.nodeID, self.node._self.nodeID),
-      contact: contact
-    };
-  });
-
-  distances.sort(function(a, b) {
-    return utils.compareKeys(a.distance, b.distance);
-  });
-
-  if (distances.length >= 1) {
-    var closestWithoutValue = distances[0].contact;
-    var message = new Message('STORE', {
-      key: self.key,
-      value: self.value
-    }, this.node._self);
-
-    this.node._rpc.send(closestWithoutValue, message);
-  }
-
-  callback(null, 'VALUE', self.value);
-};
-
-module.exports = Router;
-
-},{"./constants":238,"./contact":239,"./message":244,"./utils":253,"assert":2,"async":254,"lodash":267}],247:[function(require,module,exports){
-/**
-* @module kad/rpc
-*/
-
-'use strict';
-
-var inherits = require('util').inherits;
-var events = require('events');
-var assert = require('assert');
-var dgram = require('dgram');
-var hat = require('hat');
-var merge = require('merge');
-var constants = require('./constants');
-var Contact = require('./contact');
-var Message = require('./message');
-var Logger = require('./logger');
-
-inherits(RPC, events.EventEmitter);
-
-/**
-* Represents an RPC interface
-* @constructor
-* @param {object} options
-*/
-function RPC(options) {
-
-  assert(this instanceof RPC, 'Invalid instance supplied');
-
-  var self = this;
-
-  events.EventEmitter.call(this);
-
-  this._createMessageID = hat.rack(constants.B);
-  this._pendingCalls = {};
-  this._contact = this._createContact(options);
-  this._log = new Logger(options ? options.logLevel : 0);
-
-  setInterval(this._expireCalls.bind(this), constants.T_RESPONSETIMEOUT + 5);
-}
-
-/**
-* Send a RPC to the given contact
-* #send
-* @param {object} contact
-* @param {object} message
-* @param {function} callback
-*/
-RPC.prototype.send = function(contact, message, callback) {
-  contact = this._createContact(contact);
-  
-  assert(contact instanceof Contact, 'Invalid contact supplied');
-  assert(message instanceof Message, 'Invalid message supplied');
-
-  merge(message.params, {
-    rpcID: this._createMessageID()
-  });
-
-  var data = message.serialize();
-  var offset = 0;
-
-  this._send(data, contact);
-
-  if (typeof callback === 'function') {
-    this._pendingCalls[message.params.rpcID] = {
-      timestamp: Date.now(),
-      callback: callback
-    };
-  }
-};
-
-/**
-* Close the underlying socket
-* #close
-*/
-RPC.prototype.close = function() {
-  this._close();
-};
-
-/**
-* Handle incoming messages
-* #_handleMessage
-* @param {buffer} buffer
-* @param {object} info
-*/
-RPC.prototype._handleMessage = function(buffer, info) {
-  var message;
-  var data;
-  var params;
-  var contact;
-
-  try {
-    data = JSON.parse(buffer.toString('utf8'));
-    params = data.params;
-    contact = this._createContact(params);
-    message = new Message(data.type, params, contact);
-    this._log.debug('received valid message %j', message);
-  } catch(err) {
-    return this.emit('MESSAGE_DROP', buffer, info);
-  }
-
-  var referenceID = message.params.referenceID;
-  var pendingCall = this._pendingCalls[referenceID];
-
-  if (referenceID && pendingCall) {
-    pendingCall.callback(null, message.params);
-    delete this._pendingCalls[referenceID];
-  } else {
-    this.emit('CONTACT_SEEN', contact);
-    this.emit(message.type, message.params);
-  }
-};
-
-/**
-* Expire RPCs that have not received a reply
-* #_expireCalls
-*/
-RPC.prototype._expireCalls = function() {
-  for (var rpcID in this._pendingCalls) {
-    var pendingCall = this._pendingCalls[rpcID];
-    var timePassed = Date.now() - pendingCall.timestamp;
-
-    if (timePassed > constants.T_RESPONSETIMEOUT) {
-      pendingCall.callback(new Error('RPC with ID `' + rpcID + '` timed out'));
-      delete this._pendingCalls[rpcID];
-    }
-  }
-};
-
-/* istanbul ignore next */
-/**
-* Unimplemented stub, called on close()
-* #_close
-*/
-RPC.prototype._close = function() {
-  throw new Error('Method not implemented');
-};
-
-/* istanbul ignore next */
-/**
-* Unimplemented stub, called on send()
-* #_send
-* @param {buffer} data
-* @param {Contact} contact
-*/
-RPC.prototype._send = function(data, contact) {
-  throw new Error('Method not implemented');
-};
-
-/* istanbul ignore next */
-/**
-* Unimplemented stub, called in RPC()
-* #_createContact
-* @param {object} options
-*/
-RPC.prototype._createContact = function(options) {
-  throw new Error('Method not implemented');
-};
-
-module.exports = RPC;
-
-},{"./constants":238,"./contact":239,"./logger":243,"./message":244,"assert":2,"dgram":1,"events":200,"hat":266,"merge":268,"util":232}],248:[function(require,module,exports){
-(function (Buffer){
-/**
-* @module kad/transports/http
-*/
-
-'use strict';
-
-var AddressPortContact = require('../contacts/address-port-contact');
-var inherits = require('util').inherits;
-var http = require('http');
-var RPC = require('../rpc');
-
-inherits(HTTPTransport, RPC);
-
-/**
-* Represents an HTTP transport for RPC
-* @constructor
-* @param {object} options
-*/
-function HTTPTransport(options) {
-  if (!(this instanceof HTTPTransport)) {
-    return new HTTPTransport(options);
-  }
-
-  RPC.call(this, options);
-
-  var self = this;
-
-  this._queuedResponses = {};
-
-  this._server = http.createServer(function(req, res) {
-    var payload = '';
-
-    req.on('data', function(chunk) {
-      payload += chunk.toString();
-    });
-
-    req.on('end', function() {
-      try {
-        var parsed = JSON.parse(payload);
-
-        if (parsed.params.rpcID) {
-          self._queuedResponses[parsed.params.rpcID] = res;
-        }
-      } catch(err) {
-        // noop
-      }
-
-      self._handleMessage(new Buffer(payload), {});
-    });
-  });
-
-  this._server.listen(this._contact.port, this._contact.address, function() {
-    self.emit('ready');
-  });
-}
-
-/**
-* Create a HTTP Contact
-* #_createContact
-* @param {object} options
-*/
-HTTPTransport.prototype._createContact = function(options) {
-  return new AddressPortContact(options);
-}
-
-/**
-* Send a RPC to the given contact
-* #_send
-* @param {buffer} data
-* @param {Contact} contact
-*/
-HTTPTransport.prototype._send = function(data, contact) {
-  var self = this;
-  var parsed = JSON.parse(data.toString());
-  var referenceID = parsed.params.referenceID;
-
-  if (referenceID && this._queuedResponses[referenceID]) {
-    this._queuedResponses[referenceID].end(data);
-    delete this._queuedResponses[referenceID];
-    return;
-  }
-
-  var options = {
-    hostname: contact.address,
-    port: contact.port,
-    method: 'POST'
-  };
-  var req = http.request(options, handleResponse);
-
-  function handleResponse(res) {
-    var payload = '';
-
-    res.on('data', function(chunk) {
-      payload += chunk.toString();
-    });
-
-    res.on('end', function() {
-      self._handleMessage(new Buffer(payload), {});
-    });
-  }
-
-  req.on('error', function(err) {
-    self._handleMessage(null);
-  });
-
-  req.end(data);
-};
-
-/**
-* Close the underlying socket
-* #_close
-*/
-HTTPTransport.prototype._close = function() {
-  this._server.close();
-};
-
-module.exports = HTTPTransport;
-
-}).call(this,require("buffer").Buffer)
-},{"../contacts/address-port-contact":240,"../rpc":247,"buffer":4,"http":223,"util":232}],249:[function(require,module,exports){
-/**
-* @module kad/transports
-*/
-
-'use strict';
-
-module.exports = {
-  TCP: require('./tcp'),
-  UDP: require('./udp'),
-  WebRTC: require('./webrtc'),
-  HTTP: require('./http')
-};
-
-},{"./http":248,"./tcp":250,"./udp":251,"./webrtc":252}],250:[function(require,module,exports){
-(function (Buffer){
-/**
-* @module kad/transports/tcp
-*/
-
-'use strict';
-
-var inherits = require('util').inherits;
-var clarinet = require('clarinet');
-var net = require('net');
-var AddressPortContact = require('../contacts/address-port-contact');
-var Message = require('../message');
-var RPC = require('../rpc');
-var utils = require('../utils');
-
-inherits(TCPTransport, RPC);
-
-/**
-* Represents an RPC interface over TCP
-* @constructor
-* @param {object} options
-*/
-function TCPTransport(options) {
-  if (!(this instanceof TCPTransport)) {
-    return new TCPTransport(options);
-  }
-
-  var self = this;
-
-  RPC.call(this, options);
-
-  this._socket = net.createServer(this._handleConnection.bind(this));
-
-  this._socket.on('error', function(err) {
-    var contact = self._contact;
-    self._log.warn('failed to bind to supplied address %s', contact.address);
-    self._log.info('binding to all interfaces as a fallback');
-    self._socket.close();
-
-    self._socket = net.createServer(self._handleConnection.bind(self));
-
-    self._socket.listen(contact.port);
-  });
-
-  this._socket.on('listening', function() {
-    self.emit('ready');
-  });
-
-  this._socket.listen(this._contact.port, this._contact.address);
-}
-
-/**
-* Create a TCP Contact
-* #_createContact
-* @param {object} options
-*/
-TCPTransport.prototype._createContact = function(options) {
-  return new AddressPortContact(options);
-};
-
-/**
-* Send a RPC to the given contact
-* #_send
-* @param {buffer} data
-* @param {Contact} contact
-*/
-TCPTransport.prototype._send = function(data, contact) {
-  var self = this;
-  var sock = net.createConnection(contact.port, contact.address);
-
-  sock.on('error', function(err) {
-    self._log.error('error connecting to peer', err);
-  });
-
-  sock.end(data);
-};
-
-/**
-* Close the underlying socket
-* #_close
-*/
-TCPTransport.prototype._close = function() {
-  this._socket.close();
-};
-
-/**
-* Handle incoming connection
-* #_handleConnection
-* @param {object} socket
-*/
-TCPTransport.prototype._handleConnection = function(socket) {
-  var self = this;
-  var addr = socket.remoteAddress;
-  var port = socket.remotePort;
-  var parser = clarinet.createStream();
-  var buffer = '';
-  var opened = 0;
-  var closed = 0;
-
-  this._log.info('connection opened with %s:%s', addr, port);
-
-  parser.on('openobject', function(key) {
-    opened++;
-  });
-
-  parser.on('closeobject', function() {
-    closed++;
-
-    if (opened === closed) {
-      self._handleMessage(new Buffer(buffer), { address: addr, port: port });
-
-      buffer = '';
-      opened = 0;
-      closed = 0;
-    }
-  });
-
-  parser.on('error', function(err) {
-    socket.close();
-  });
-
-  socket.on('error', function(err) {
-    self._log.error('error communicating with peer %s:%s', addr, port);
-  });
-
-  socket.on('data', function(data) {
-    buffer += data.toString('utf8');
-    parser.write(data.toString('utf8'));
-  });
-};
-
-module.exports = TCPTransport;
-
-}).call(this,require("buffer").Buffer)
-},{"../contacts/address-port-contact":240,"../message":244,"../rpc":247,"../utils":253,"buffer":4,"clarinet":255,"net":1,"util":232}],251:[function(require,module,exports){
-/**
-* @module kad/transports/udp
-*/
-
-'use strict';
-
-var AddressPortContact = require('../contacts/address-port-contact');
-var inherits = require('util').inherits;
-var dgram = require('dgram');
-var RPC = require('../rpc');
-
-inherits(UDPTransport, RPC);
-
-/**
-* Represents an UDP transport for RPC
-* @constructor
-* @param {object} options
-*/
-function UDPTransport(options) {
-  if (!(this instanceof UDPTransport)) {
-    return new UDPTransport(options);
-  }
-
-  var self = this;
-  var socketOptions = { type: 'udp4', reuseAddr: true };
-  var socketMessageHandler = this._handleMessage.bind(this);
-
-  RPC.call(this, options);
-
-  this._socket = dgram.createSocket(socketOptions, socketMessageHandler);
-
-  this._socket.on('error', function(err) {
-    var contact = self._contact;
-    self._log.warn('failed to bind to supplied address %s', contact.address);
-    self._log.info('binding to all interfaces as a fallback');
-    self._socket.close();
-
-    self._socket = dgram.createSocket(socketOptions, socketMessageHandler);
-
-    self._socket.bind(contact.port);
-  });
-
-  this._socket.on('listening', function() {
-    self.emit('ready');
-  });
-
-  this._socket.bind(this._contact.port, this._contact.address);
-}
-
-/**
-* Create a UDP Contact
-* #_createContact
-* @param {object} options
-*/
-UDPTransport.prototype._createContact = function(options) {
-  return new AddressPortContact(options);
-}
-
-/**
-* Send a RPC to the given contact
-* #_send
-* @param {buffer} data
-* @param {Contact} contact
-*/
-UDPTransport.prototype._send = function(data, contact) {
-  this._socket.send(data, 0, data.length, contact.port, contact.address);
-};
-
-/**
-* Close the underlying socket
-* #_close
-*/
-UDPTransport.prototype._close = function() {
-  this._socket.close();
-};
-
-module.exports = UDPTransport;
-
-},{"../contacts/address-port-contact":240,"../rpc":247,"dgram":1,"util":232}],252:[function(require,module,exports){
-/**
-* @module kad/transports/webrtc
-*/
-
-'use strict';
-
-var assert = require('assert');
-var hat = require('hat');
-var inherits = require('util').inherits;
-var WebRTCContact = require('../contacts/webrtc-contact');
-var RPC = require('../rpc');
-var SimplePeer = require('simple-peer');
-
-inherits(WebRTCTransport, RPC);
-
-/**
-* Represents an RPC interface over WebRTC
-* @constructor
-* @param {object} options
-*/
-function WebRTCTransport(options) {
-  if (!(this instanceof WebRTCTransport)) {
-    return new WebRTCTransport(options);
-  }
-
-  assert(options instanceof Object, 'Invalid options were supplied');
-  assert(options.signaller instanceof Object, 'Invalid signaller was supplied');
-
-  var self = this
-
-  RPC.call(this, options);
-
-  this._peers = {};
-  this._wrtc = options.wrtc;
-  this._signaller = options.signaller;
-  this._signalHandler = this._onSignal.bind(this);
-  this._signaller.addListener(this._contact.nick, this._signalHandler)
-
-  setTimeout(this.emit.bind(this, 'ready'));
-}
-
-/**
-* Handle a message sent through `_signaller` from another peer
-* #_onSignal
-* @param {object} signallerMessage
-*/
-WebRTCTransport.prototype._onSignal = function(signallerMessage) {
-  var self = this;
-  var signal = signallerMessage.signal;
-  var sender = signallerMessage.sender;
-  var handshakeID = signallerMessage.handshakeID;
-  var peer = this._peers[signallerMessage.handshakeID];
-  if(!peer) {
-    peer = this._createPeer(sender, handshakeID, false);
-    peer.once('data', function(data) {
-      self._handleMessage(data, { nick: signallerMessage.sender });
-    });
-  }
-  peer.signal(signal);
-}
-
-/**
-* Create a WebRTC Contact
-* #_createContact
-* @param {object} options
-*/
-WebRTCTransport.prototype._createContact = function(options) {
-  return new WebRTCContact(options);
-};
-
-/**
-* Send a RPC to the given contact
-* #_send
-* @param {buffer} data
-* @param {Contact} contact
-*/
-WebRTCTransport.prototype._send = function(data, contact) {
-  var self = this;
-  var handshakeID = hat();
-  var newPeer = this._createPeer(contact.nick, handshakeID, true);
-  newPeer.once('connect', function() {
-    newPeer.send(data);
-    setTimeout(function() {
-      newPeer.destroy();
-    });
-  });
-};
-
-/**
-* Initialize a WebRTC peer and store it in `_peers`
-* #_createPeer
-* @param {string} nick
-* @param {string} handshakeID
-* @param {boolean} initiator
-*/
-WebRTCTransport.prototype._createPeer = function(nick, handshakeID, initiator) {
-  var self = this;
-  var peer = new SimplePeer({ wrtc: this._wrtc, initiator: initiator });
-  peer.on('signal', function(signal) {
-    self._signaller.emit(nick, {
-      sender: self._contact.nick,
-      handshakeID: handshakeID,
-      signal: signal
-    });
-  });
-  peer.on('error', function(err) {
-    self._log.error('peer encountered an error %s', err.message);
-  });
-  peer.once('close', function() {
-    peer.removeAllListeners('data');
-    peer.removeAllListeners('signal');
-    peer.removeAllListeners('error');
-    delete self._peers[handshakeID];
-  })
-  this._peers[handshakeID] = peer;
-  return peer;
-}
-
-/**
-* Close the underlying socket
-* #_close
-*/
-WebRTCTransport.prototype._close = function() {
-  var self = this;
-  Object.keys(this._peers).forEach(function(handshakeID) {
-    self._peers[handshakeID].destroy();
-  });
-  this._peers = {};
-  this._signaller.removeListener(this._contact.nick, this._signalHandler);
-};
-
-module.exports = WebRTCTransport;
-
-},{"../contacts/webrtc-contact":241,"../rpc":247,"assert":2,"hat":266,"simple-peer":270,"util":232}],253:[function(require,module,exports){
-(function (Buffer){
-/**
-* @module kad/utils
-*/
-
-'use strict';
-
-var assert = require('assert');
-var crypto = require('crypto');
-var constants = require('./constants');
-
-/**
-* Validate a key
-* #isValidKey
-*/
-exports.isValidKey = function(key) {
-  return !!key && key.length === constants.B / 4;
-};
-
-/**
-* Create a valid ID from the given string
-* #createID
-* @param {string} data
-*/
-exports.createID = function(data) {
-  return crypto.createHash('sha1').update(data).digest('hex');
-};
-
-/**
-* Convert a key to a buffer
-* #hexToBuffer
-* @param {string} hexString
-*/
-exports.hexToBuffer = function(hexString) {
-  var buf = new Buffer(constants.K)
-
-  buf.write(hexString, 0, 'hex');
-
-  return buf;
-}
-
-/**
-* Calculate the distance between two keys
-* #getDistance
-* @param {string} id1
-* @param {string} id2
-*/
-exports.getDistance = function(id1, id2) {
-  assert(exports.isValidKey(id1), 'Invalid key supplied');
-  assert(exports.isValidKey(id2), 'Invalid key supplied');
-
-  var distance = new Buffer(constants.K);
-  var id1Buf = exports.hexToBuffer(id1);
-  var id2Buf = exports.hexToBuffer(id2);
-
-  for(var i = 0; i < constants.K; ++i) {
-    distance[i] = id1Buf[i] ^ id2Buf[i];
-  }
-
-  return distance;
-};
-
-/**
-* Compare two buffers for sorting
-* #compareKeys
-* @param {buffer} b1
-* @param {buffer} b2
-*/
-exports.compareKeys = function(b1, b2) {
-  assert.equal(b1.length, b2.length);
-
-  for (var i = 0; i < b1.length; ++i) {
-    if (b1[i] !== b2[i]) {
-      if (b1[i] < b2[i]) {
-        return -1;
-      } else {
-        return 1;
-      }
-    }
-  }
-
-  return 0;
-};
-
-/**
-* Calculate the index of the bucket that key would belong to
-* #getBucketIndex
-* @param {string} id1
-* @param {string} id2
-*/
-exports.getBucketIndex = function(id1, id2) {
-  assert(exports.isValidKey(id1), 'Invalid key supplied');
-  assert(exports.isValidKey(id2), 'Invalid key supplied');
-
-  var distance = exports.getDistance(id1, id2);
-  var bucketNum = constants.B;
-
-  for (var i = 0; i < distance.length; i++) {
-    if (distance[i] === 0) {
-      bucketNum -= 8;
-      continue;
-    }
-
-    for (var j = 0; j < 8; j++) {
-      if (distance[i] & (0x80 >> j)) {
-        return --bucketNum;
-      } else {
-        bucketNum--;
-      }
-    }
-  }
-
-  return bucketNum;
-};
-
-/**
-* #getPowerOfTwoBuffer
-* @param {number} exp
-*/
-exports.getPowerOfTwoBuffer = function(exp) {
-  assert.ok(exp >= 0 && exp < constants.B);
-
-  var buffer = new Buffer(constants.K);
-  var byte = parseInt(exp / 8);
-
-  // we set the byte containing the bit to the right left shifted amount
-  buffer.fill(0);
-  buffer[constants.K - byte - 1] = 1 << (exp % 8);
-
-  return buffer;
-};
-
-/**
-* Assuming index corresponds to power of 2
-* (index = n has nodes within distance 2^n <= distance < 2^(n+1))
-* #getRandomInBucketRangeBuffer
-* @param {number} index
-*/
-exports.getRandomInBucketRangeBuffer = function(index) {
-  var base = exports.getPowerOfTwoBuffer(index);
-  var byte = parseInt(index / 8); // randomize bytes below the power of two
-
-  for (var i = constants.K - 1; i > (constants.K - byte - 1); i--) {
-    base[i] = parseInt(Math.random() * 256);
-  }
-
-  // also randomize the bits below the number in that byte
-  // and remember arrays are off by 1
-  for (var i = index - 1; i >= byte * 8; i--) {
-    var one = Math.random() >= 0.5;
-    var shiftAmount = i - byte * 8;
-
-    base[constants.K - byte - 1] |= one ? (1 << shiftAmount) : 0;
-  }
-
-  return base;
-};
-
-}).call(this,require("buffer").Buffer)
-},{"./constants":238,"assert":2,"buffer":4,"crypto":8}],254:[function(require,module,exports){
-(function (process){
-/*!
- * async
- * https://github.com/caolan/async
- *
- * Copyright 2010-2014 Caolan McMahon
- * Released under the MIT license
- */
-/*jshint onevar: false, indent:4 */
-/*global setImmediate: false, setTimeout: false, console: false */
-(function () {
-
-    var async = {};
-
-    // global on the server, window in the browser
-    var root, previous_async;
-
-    root = this;
-    if (root != null) {
-      previous_async = root.async;
-    }
-
-    async.noConflict = function () {
-        root.async = previous_async;
-        return async;
-    };
-
-    function only_once(fn) {
-        var called = false;
-        return function() {
-            if (called) throw new Error("Callback was already called.");
-            called = true;
-            fn.apply(root, arguments);
-        }
-    }
-
-    //// cross-browser compatiblity functions ////
-
-    var _toString = Object.prototype.toString;
-
-    var _isArray = Array.isArray || function (obj) {
-        return _toString.call(obj) === '[object Array]';
-    };
-
-    var _each = function (arr, iterator) {
-        for (var i = 0; i < arr.length; i += 1) {
-            iterator(arr[i], i, arr);
-        }
-    };
-
-    var _map = function (arr, iterator) {
-        if (arr.map) {
-            return arr.map(iterator);
-        }
-        var results = [];
-        _each(arr, function (x, i, a) {
-            results.push(iterator(x, i, a));
-        });
-        return results;
-    };
-
-    var _reduce = function (arr, iterator, memo) {
-        if (arr.reduce) {
-            return arr.reduce(iterator, memo);
-        }
-        _each(arr, function (x, i, a) {
-            memo = iterator(memo, x, i, a);
-        });
-        return memo;
-    };
-
-    var _keys = function (obj) {
-        if (Object.keys) {
-            return Object.keys(obj);
-        }
-        var keys = [];
-        for (var k in obj) {
-            if (obj.hasOwnProperty(k)) {
-                keys.push(k);
-            }
-        }
-        return keys;
-    };
-
-    //// exported async module functions ////
-
-    //// nextTick implementation with browser-compatible fallback ////
-    if (typeof process === 'undefined' || !(process.nextTick)) {
-        if (typeof setImmediate === 'function') {
-            async.nextTick = function (fn) {
-                // not a direct alias for IE10 compatibility
-                setImmediate(fn);
-            };
-            async.setImmediate = async.nextTick;
-        }
-        else {
-            async.nextTick = function (fn) {
-                setTimeout(fn, 0);
-            };
-            async.setImmediate = async.nextTick;
-        }
-    }
-    else {
-        async.nextTick = process.nextTick;
-        if (typeof setImmediate !== 'undefined') {
-            async.setImmediate = function (fn) {
-              // not a direct alias for IE10 compatibility
-              setImmediate(fn);
-            };
-        }
-        else {
-            async.setImmediate = async.nextTick;
-        }
-    }
-
-    async.each = function (arr, iterator, callback) {
-        callback = callback || function () {};
-        if (!arr.length) {
-            return callback();
-        }
-        var completed = 0;
-        _each(arr, function (x) {
-            iterator(x, only_once(done) );
-        });
-        function done(err) {
-          if (err) {
-              callback(err);
-              callback = function () {};
-          }
-          else {
-              completed += 1;
-              if (completed >= arr.length) {
-                  callback();
-              }
-          }
-        }
-    };
-    async.forEach = async.each;
-
-    async.eachSeries = function (arr, iterator, callback) {
-        callback = callback || function () {};
-        if (!arr.length) {
-            return callback();
-        }
-        var completed = 0;
-        var iterate = function () {
-            iterator(arr[completed], function (err) {
-                if (err) {
-                    callback(err);
-                    callback = function () {};
-                }
-                else {
-                    completed += 1;
-                    if (completed >= arr.length) {
-                        callback();
-                    }
-                    else {
-                        iterate();
-                    }
-                }
-            });
-        };
-        iterate();
-    };
-    async.forEachSeries = async.eachSeries;
-
-    async.eachLimit = function (arr, limit, iterator, callback) {
-        var fn = _eachLimit(limit);
-        fn.apply(null, [arr, iterator, callback]);
-    };
-    async.forEachLimit = async.eachLimit;
-
-    var _eachLimit = function (limit) {
-
-        return function (arr, iterator, callback) {
-            callback = callback || function () {};
-            if (!arr.length || limit <= 0) {
-                return callback();
-            }
-            var completed = 0;
-            var started = 0;
-            var running = 0;
-
-            (function replenish () {
-                if (completed >= arr.length) {
-                    return callback();
-                }
-
-                while (running < limit && started < arr.length) {
-                    started += 1;
-                    running += 1;
-                    iterator(arr[started - 1], function (err) {
-                        if (err) {
-                            callback(err);
-                            callback = function () {};
-                        }
-                        else {
-                            completed += 1;
-                            running -= 1;
-                            if (completed >= arr.length) {
-                                callback();
-                            }
-                            else {
-                                replenish();
-                            }
-                        }
-                    });
-                }
-            })();
-        };
-    };
-
-
-    var doParallel = function (fn) {
-        return function () {
-            var args = Array.prototype.slice.call(arguments);
-            return fn.apply(null, [async.each].concat(args));
-        };
-    };
-    var doParallelLimit = function(limit, fn) {
-        return function () {
-            var args = Array.prototype.slice.call(arguments);
-            return fn.apply(null, [_eachLimit(limit)].concat(args));
-        };
-    };
-    var doSeries = function (fn) {
-        return function () {
-            var args = Array.prototype.slice.call(arguments);
-            return fn.apply(null, [async.eachSeries].concat(args));
-        };
-    };
-
-
-    var _asyncMap = function (eachfn, arr, iterator, callback) {
-        arr = _map(arr, function (x, i) {
-            return {index: i, value: x};
-        });
-        if (!callback) {
-            eachfn(arr, function (x, callback) {
-                iterator(x.value, function (err) {
-                    callback(err);
-                });
-            });
-        } else {
-            var results = [];
-            eachfn(arr, function (x, callback) {
-                iterator(x.value, function (err, v) {
-                    results[x.index] = v;
-                    callback(err);
-                });
-            }, function (err) {
-                callback(err, results);
-            });
-        }
-    };
-    async.map = doParallel(_asyncMap);
-    async.mapSeries = doSeries(_asyncMap);
-    async.mapLimit = function (arr, limit, iterator, callback) {
-        return _mapLimit(limit)(arr, iterator, callback);
-    };
-
-    var _mapLimit = function(limit) {
-        return doParallelLimit(limit, _asyncMap);
-    };
-
-    // reduce only has a series version, as doing reduce in parallel won't
-    // work in many situations.
-    async.reduce = function (arr, memo, iterator, callback) {
-        async.eachSeries(arr, function (x, callback) {
-            iterator(memo, x, function (err, v) {
-                memo = v;
-                callback(err);
-            });
-        }, function (err) {
-            callback(err, memo);
-        });
-    };
-    // inject alias
-    async.inject = async.reduce;
-    // foldl alias
-    async.foldl = async.reduce;
-
-    async.reduceRight = function (arr, memo, iterator, callback) {
-        var reversed = _map(arr, function (x) {
-            return x;
-        }).reverse();
-        async.reduce(reversed, memo, iterator, callback);
-    };
-    // foldr alias
-    async.foldr = async.reduceRight;
-
-    var _filter = function (eachfn, arr, iterator, callback) {
-        var results = [];
-        arr = _map(arr, function (x, i) {
-            return {index: i, value: x};
-        });
-        eachfn(arr, function (x, callback) {
-            iterator(x.value, function (v) {
-                if (v) {
-                    results.push(x);
-                }
-                callback();
-            });
-        }, function (err) {
-            callback(_map(results.sort(function (a, b) {
-                return a.index - b.index;
-            }), function (x) {
-                return x.value;
-            }));
-        });
-    };
-    async.filter = doParallel(_filter);
-    async.filterSeries = doSeries(_filter);
-    // select alias
-    async.select = async.filter;
-    async.selectSeries = async.filterSeries;
-
-    var _reject = function (eachfn, arr, iterator, callback) {
-        var results = [];
-        arr = _map(arr, function (x, i) {
-            return {index: i, value: x};
-        });
-        eachfn(arr, function (x, callback) {
-            iterator(x.value, function (v) {
-                if (!v) {
-                    results.push(x);
-                }
-                callback();
-            });
-        }, function (err) {
-            callback(_map(results.sort(function (a, b) {
-                return a.index - b.index;
-            }), function (x) {
-                return x.value;
-            }));
-        });
-    };
-    async.reject = doParallel(_reject);
-    async.rejectSeries = doSeries(_reject);
-
-    var _detect = function (eachfn, arr, iterator, main_callback) {
-        eachfn(arr, function (x, callback) {
-            iterator(x, function (result) {
-                if (result) {
-                    main_callback(x);
-                    main_callback = function () {};
-                }
-                else {
-                    callback();
-                }
-            });
-        }, function (err) {
-            main_callback();
-        });
-    };
-    async.detect = doParallel(_detect);
-    async.detectSeries = doSeries(_detect);
-
-    async.some = function (arr, iterator, main_callback) {
-        async.each(arr, function (x, callback) {
-            iterator(x, function (v) {
-                if (v) {
-                    main_callback(true);
-                    main_callback = function () {};
-                }
-                callback();
-            });
-        }, function (err) {
-            main_callback(false);
-        });
-    };
-    // any alias
-    async.any = async.some;
-
-    async.every = function (arr, iterator, main_callback) {
-        async.each(arr, function (x, callback) {
-            iterator(x, function (v) {
-                if (!v) {
-                    main_callback(false);
-                    main_callback = function () {};
-                }
-                callback();
-            });
-        }, function (err) {
-            main_callback(true);
-        });
-    };
-    // all alias
-    async.all = async.every;
-
-    async.sortBy = function (arr, iterator, callback) {
-        async.map(arr, function (x, callback) {
-            iterator(x, function (err, criteria) {
-                if (err) {
-                    callback(err);
-                }
-                else {
-                    callback(null, {value: x, criteria: criteria});
-                }
-            });
-        }, function (err, results) {
-            if (err) {
-                return callback(err);
-            }
-            else {
-                var fn = function (left, right) {
-                    var a = left.criteria, b = right.criteria;
-                    return a < b ? -1 : a > b ? 1 : 0;
-                };
-                callback(null, _map(results.sort(fn), function (x) {
-                    return x.value;
-                }));
-            }
-        });
-    };
-
-    async.auto = function (tasks, callback) {
-        callback = callback || function () {};
-        var keys = _keys(tasks);
-        var remainingTasks = keys.length
-        if (!remainingTasks) {
-            return callback();
-        }
-
-        var results = {};
-
-        var listeners = [];
-        var addListener = function (fn) {
-            listeners.unshift(fn);
-        };
-        var removeListener = function (fn) {
-            for (var i = 0; i < listeners.length; i += 1) {
-                if (listeners[i] === fn) {
-                    listeners.splice(i, 1);
-                    return;
-                }
-            }
-        };
-        var taskComplete = function () {
-            remainingTasks--
-            _each(listeners.slice(0), function (fn) {
-                fn();
-            });
-        };
-
-        addListener(function () {
-            if (!remainingTasks) {
-                var theCallback = callback;
-                // prevent final callback from calling itself if it errors
-                callback = function () {};
-
-                theCallback(null, results);
-            }
-        });
-
-        _each(keys, function (k) {
-            var task = _isArray(tasks[k]) ? tasks[k]: [tasks[k]];
-            var taskCallback = function (err) {
-                var args = Array.prototype.slice.call(arguments, 1);
-                if (args.length <= 1) {
-                    args = args[0];
-                }
-                if (err) {
-                    var safeResults = {};
-                    _each(_keys(results), function(rkey) {
-                        safeResults[rkey] = results[rkey];
-                    });
-                    safeResults[k] = args;
-                    callback(err, safeResults);
-                    // stop subsequent errors hitting callback multiple times
-                    callback = function () {};
-                }
-                else {
-                    results[k] = args;
-                    async.setImmediate(taskComplete);
-                }
-            };
-            var requires = task.slice(0, Math.abs(task.length - 1)) || [];
-            var ready = function () {
-                return _reduce(requires, function (a, x) {
-                    return (a && results.hasOwnProperty(x));
-                }, true) && !results.hasOwnProperty(k);
-            };
-            if (ready()) {
-                task[task.length - 1](taskCallback, results);
-            }
-            else {
-                var listener = function () {
-                    if (ready()) {
-                        removeListener(listener);
-                        task[task.length - 1](taskCallback, results);
-                    }
-                };
-                addListener(listener);
-            }
-        });
-    };
-
-    async.retry = function(times, task, callback) {
-        var DEFAULT_TIMES = 5;
-        var attempts = [];
-        // Use defaults if times not passed
-        if (typeof times === 'function') {
-            callback = task;
-            task = times;
-            times = DEFAULT_TIMES;
-        }
-        // Make sure times is a number
-        times = parseInt(times, 10) || DEFAULT_TIMES;
-        var wrappedTask = function(wrappedCallback, wrappedResults) {
-            var retryAttempt = function(task, finalAttempt) {
-                return function(seriesCallback) {
-                    task(function(err, result){
-                        seriesCallback(!err || finalAttempt, {err: err, result: result});
-                    }, wrappedResults);
-                };
-            };
-            while (times) {
-                attempts.push(retryAttempt(task, !(times-=1)));
-            }
-            async.series(attempts, function(done, data){
-                data = data[data.length - 1];
-                (wrappedCallback || callback)(data.err, data.result);
-            });
-        }
-        // If a callback is passed, run this as a controll flow
-        return callback ? wrappedTask() : wrappedTask
-    };
-
-    async.waterfall = function (tasks, callback) {
-        callback = callback || function () {};
-        if (!_isArray(tasks)) {
-          var err = new Error('First argument to waterfall must be an array of functions');
-          return callback(err);
-        }
-        if (!tasks.length) {
-            return callback();
-        }
-        var wrapIterator = function (iterator) {
-            return function (err) {
-                if (err) {
-                    callback.apply(null, arguments);
-                    callback = function () {};
-                }
-                else {
-                    var args = Array.prototype.slice.call(arguments, 1);
-                    var next = iterator.next();
-                    if (next) {
-                        args.push(wrapIterator(next));
-                    }
-                    else {
-                        args.push(callback);
-                    }
-                    async.setImmediate(function () {
-                        iterator.apply(null, args);
-                    });
-                }
-            };
-        };
-        wrapIterator(async.iterator(tasks))();
-    };
-
-    var _parallel = function(eachfn, tasks, callback) {
-        callback = callback || function () {};
-        if (_isArray(tasks)) {
-            eachfn.map(tasks, function (fn, callback) {
-                if (fn) {
-                    fn(function (err) {
-                        var args = Array.prototype.slice.call(arguments, 1);
-                        if (args.length <= 1) {
-                            args = args[0];
-                        }
-                        callback.call(null, err, args);
-                    });
-                }
-            }, callback);
-        }
-        else {
-            var results = {};
-            eachfn.each(_keys(tasks), function (k, callback) {
-                tasks[k](function (err) {
-                    var args = Array.prototype.slice.call(arguments, 1);
-                    if (args.length <= 1) {
-                        args = args[0];
-                    }
-                    results[k] = args;
-                    callback(err);
-                });
-            }, function (err) {
-                callback(err, results);
-            });
-        }
-    };
-
-    async.parallel = function (tasks, callback) {
-        _parallel({ map: async.map, each: async.each }, tasks, callback);
-    };
-
-    async.parallelLimit = function(tasks, limit, callback) {
-        _parallel({ map: _mapLimit(limit), each: _eachLimit(limit) }, tasks, callback);
-    };
-
-    async.series = function (tasks, callback) {
-        callback = callback || function () {};
-        if (_isArray(tasks)) {
-            async.mapSeries(tasks, function (fn, callback) {
-                if (fn) {
-                    fn(function (err) {
-                        var args = Array.prototype.slice.call(arguments, 1);
-                        if (args.length <= 1) {
-                            args = args[0];
-                        }
-                        callback.call(null, err, args);
-                    });
-                }
-            }, callback);
-        }
-        else {
-            var results = {};
-            async.eachSeries(_keys(tasks), function (k, callback) {
-                tasks[k](function (err) {
-                    var args = Array.prototype.slice.call(arguments, 1);
-                    if (args.length <= 1) {
-                        args = args[0];
-                    }
-                    results[k] = args;
-                    callback(err);
-                });
-            }, function (err) {
-                callback(err, results);
-            });
-        }
-    };
-
-    async.iterator = function (tasks) {
-        var makeCallback = function (index) {
-            var fn = function () {
-                if (tasks.length) {
-                    tasks[index].apply(null, arguments);
-                }
-                return fn.next();
-            };
-            fn.next = function () {
-                return (index < tasks.length - 1) ? makeCallback(index + 1): null;
-            };
-            return fn;
-        };
-        return makeCallback(0);
-    };
-
-    async.apply = function (fn) {
-        var args = Array.prototype.slice.call(arguments, 1);
-        return function () {
-            return fn.apply(
-                null, args.concat(Array.prototype.slice.call(arguments))
-            );
-        };
-    };
-
-    var _concat = function (eachfn, arr, fn, callback) {
-        var r = [];
-        eachfn(arr, function (x, cb) {
-            fn(x, function (err, y) {
-                r = r.concat(y || []);
-                cb(err);
-            });
-        }, function (err) {
-            callback(err, r);
-        });
-    };
-    async.concat = doParallel(_concat);
-    async.concatSeries = doSeries(_concat);
-
-    async.whilst = function (test, iterator, callback) {
-        if (test()) {
-            iterator(function (err) {
-                if (err) {
-                    return callback(err);
-                }
-                async.whilst(test, iterator, callback);
-            });
-        }
-        else {
-            callback();
-        }
-    };
-
-    async.doWhilst = function (iterator, test, callback) {
-        iterator(function (err) {
-            if (err) {
-                return callback(err);
-            }
-            var args = Array.prototype.slice.call(arguments, 1);
-            if (test.apply(null, args)) {
-                async.doWhilst(iterator, test, callback);
-            }
-            else {
-                callback();
-            }
-        });
-    };
-
-    async.until = function (test, iterator, callback) {
-        if (!test()) {
-            iterator(function (err) {
-                if (err) {
-                    return callback(err);
-                }
-                async.until(test, iterator, callback);
-            });
-        }
-        else {
-            callback();
-        }
-    };
-
-    async.doUntil = function (iterator, test, callback) {
-        iterator(function (err) {
-            if (err) {
-                return callback(err);
-            }
-            var args = Array.prototype.slice.call(arguments, 1);
-            if (!test.apply(null, args)) {
-                async.doUntil(iterator, test, callback);
-            }
-            else {
-                callback();
-            }
-        });
-    };
-
-    async.queue = function (worker, concurrency) {
-        if (concurrency === undefined) {
-            concurrency = 1;
-        }
-        function _insert(q, data, pos, callback) {
-          if (!q.started){
-            q.started = true;
-          }
-          if (!_isArray(data)) {
-              data = [data];
-          }
-          if(data.length == 0) {
-             // call drain immediately if there are no tasks
-             return async.setImmediate(function() {
-                 if (q.drain) {
-                     q.drain();
-                 }
-             });
-          }
-          _each(data, function(task) {
-              var item = {
-                  data: task,
-                  callback: typeof callback === 'function' ? callback : null
-              };
-
-              if (pos) {
-                q.tasks.unshift(item);
-              } else {
-                q.tasks.push(item);
-              }
-
-              if (q.saturated && q.tasks.length === q.concurrency) {
-                  q.saturated();
-              }
-              async.setImmediate(q.process);
-          });
-        }
-
-        var workers = 0;
-        var q = {
-            tasks: [],
-            concurrency: concurrency,
-            saturated: null,
-            empty: null,
-            drain: null,
-            started: false,
-            paused: false,
-            push: function (data, callback) {
-              _insert(q, data, false, callback);
-            },
-            kill: function () {
-              q.drain = null;
-              q.tasks = [];
-            },
-            unshift: function (data, callback) {
-              _insert(q, data, true, callback);
-            },
-            process: function () {
-                if (!q.paused && workers < q.concurrency && q.tasks.length) {
-                    var task = q.tasks.shift();
-                    if (q.empty && q.tasks.length === 0) {
-                        q.empty();
-                    }
-                    workers += 1;
-                    var next = function () {
-                        workers -= 1;
-                        if (task.callback) {
-                            task.callback.apply(task, arguments);
-                        }
-                        if (q.drain && q.tasks.length + workers === 0) {
-                            q.drain();
-                        }
-                        q.process();
-                    };
-                    var cb = only_once(next);
-                    worker(task.data, cb);
-                }
-            },
-            length: function () {
-                return q.tasks.length;
-            },
-            running: function () {
-                return workers;
-            },
-            idle: function() {
-                return q.tasks.length + workers === 0;
-            },
-            pause: function () {
-                if (q.paused === true) { return; }
-                q.paused = true;
-            },
-            resume: function () {
-                if (q.paused === false) { return; }
-                q.paused = false;
-                // Need to call q.process once per concurrent
-                // worker to preserve full concurrency after pause
-                for (var w = 1; w <= q.concurrency; w++) {
-                    async.setImmediate(q.process);
-                }
-            }
-        };
-        return q;
-    };
-
-    async.priorityQueue = function (worker, concurrency) {
-
-        function _compareTasks(a, b){
-          return a.priority - b.priority;
-        };
-
-        function _binarySearch(sequence, item, compare) {
-          var beg = -1,
-              end = sequence.length - 1;
-          while (beg < end) {
-            var mid = beg + ((end - beg + 1) >>> 1);
-            if (compare(item, sequence[mid]) >= 0) {
-              beg = mid;
-            } else {
-              end = mid - 1;
-            }
-          }
-          return beg;
-        }
-
-        function _insert(q, data, priority, callback) {
-          if (!q.started){
-            q.started = true;
-          }
-          if (!_isArray(data)) {
-              data = [data];
-          }
-          if(data.length == 0) {
-             // call drain immediately if there are no tasks
-             return async.setImmediate(function() {
-                 if (q.drain) {
-                     q.drain();
-                 }
-             });
-          }
-          _each(data, function(task) {
-              var item = {
-                  data: task,
-                  priority: priority,
-                  callback: typeof callback === 'function' ? callback : null
-              };
-
-              q.tasks.splice(_binarySearch(q.tasks, item, _compareTasks) + 1, 0, item);
-
-              if (q.saturated && q.tasks.length === q.concurrency) {
-                  q.saturated();
-              }
-              async.setImmediate(q.process);
-          });
-        }
-
-        // Start with a normal queue
-        var q = async.queue(worker, concurrency);
-
-        // Override push to accept second parameter representing priority
-        q.push = function (data, priority, callback) {
-          _insert(q, data, priority, callback);
-        };
-
-        // Remove unshift function
-        delete q.unshift;
-
-        return q;
-    };
-
-    async.cargo = function (worker, payload) {
-        var working     = false,
-            tasks       = [];
-
-        var cargo = {
-            tasks: tasks,
-            payload: payload,
-            saturated: null,
-            empty: null,
-            drain: null,
-            drained: true,
-            push: function (data, callback) {
-                if (!_isArray(data)) {
-                    data = [data];
-                }
-                _each(data, function(task) {
-                    tasks.push({
-                        data: task,
-                        callback: typeof callback === 'function' ? callback : null
-                    });
-                    cargo.drained = false;
-                    if (cargo.saturated && tasks.length === payload) {
-                        cargo.saturated();
-                    }
-                });
-                async.setImmediate(cargo.process);
-            },
-            process: function process() {
-                if (working) return;
-                if (tasks.length === 0) {
-                    if(cargo.drain && !cargo.drained) cargo.drain();
-                    cargo.drained = true;
-                    return;
-                }
-
-                var ts = typeof payload === 'number'
-                            ? tasks.splice(0, payload)
-                            : tasks.splice(0, tasks.length);
-
-                var ds = _map(ts, function (task) {
-                    return task.data;
-                });
-
-                if(cargo.empty) cargo.empty();
-                working = true;
-                worker(ds, function () {
-                    working = false;
-
-                    var args = arguments;
-                    _each(ts, function (data) {
-                        if (data.callback) {
-                            data.callback.apply(null, args);
-                        }
-                    });
-
-                    process();
-                });
-            },
-            length: function () {
-                return tasks.length;
-            },
-            running: function () {
-                return working;
-            }
-        };
-        return cargo;
-    };
-
-    var _console_fn = function (name) {
-        return function (fn) {
-            var args = Array.prototype.slice.call(arguments, 1);
-            fn.apply(null, args.concat([function (err) {
-                var args = Array.prototype.slice.call(arguments, 1);
-                if (typeof console !== 'undefined') {
-                    if (err) {
-                        if (console.error) {
-                            console.error(err);
-                        }
-                    }
-                    else if (console[name]) {
-                        _each(args, function (x) {
-                            console[name](x);
-                        });
-                    }
-                }
-            }]));
-        };
-    };
-    async.log = _console_fn('log');
-    async.dir = _console_fn('dir');
-    /*async.info = _console_fn('info');
-    async.warn = _console_fn('warn');
-    async.error = _console_fn('error');*/
-
-    async.memoize = function (fn, hasher) {
-        var memo = {};
-        var queues = {};
-        hasher = hasher || function (x) {
-            return x;
-        };
-        var memoized = function () {
-            var args = Array.prototype.slice.call(arguments);
-            var callback = args.pop();
-            var key = hasher.apply(null, args);
-            if (key in memo) {
-                async.nextTick(function () {
-                    callback.apply(null, memo[key]);
-                });
-            }
-            else if (key in queues) {
-                queues[key].push(callback);
-            }
-            else {
-                queues[key] = [callback];
-                fn.apply(null, args.concat([function () {
-                    memo[key] = arguments;
-                    var q = queues[key];
-                    delete queues[key];
-                    for (var i = 0, l = q.length; i < l; i++) {
-                      q[i].apply(null, arguments);
-                    }
-                }]));
-            }
-        };
-        memoized.memo = memo;
-        memoized.unmemoized = fn;
-        return memoized;
-    };
-
-    async.unmemoize = function (fn) {
-      return function () {
-        return (fn.unmemoized || fn).apply(null, arguments);
-      };
-    };
-
-    async.times = function (count, iterator, callback) {
-        var counter = [];
-        for (var i = 0; i < count; i++) {
-            counter.push(i);
-        }
-        return async.map(counter, iterator, callback);
-    };
-
-    async.timesSeries = function (count, iterator, callback) {
-        var counter = [];
-        for (var i = 0; i < count; i++) {
-            counter.push(i);
-        }
-        return async.mapSeries(counter, iterator, callback);
-    };
-
-    async.seq = function (/* functions... */) {
-        var fns = arguments;
-        return function () {
-            var that = this;
-            var args = Array.prototype.slice.call(arguments);
-            var callback = args.pop();
-            async.reduce(fns, args, function (newargs, fn, cb) {
-                fn.apply(that, newargs.concat([function () {
-                    var err = arguments[0];
-                    var nextargs = Array.prototype.slice.call(arguments, 1);
-                    cb(err, nextargs);
-                }]))
-            },
-            function (err, results) {
-                callback.apply(that, [err].concat(results));
-            });
-        };
-    };
-
-    async.compose = function (/* functions... */) {
-      return async.seq.apply(null, Array.prototype.reverse.call(arguments));
-    };
-
-    var _applyEach = function (eachfn, fns /*args...*/) {
-        var go = function () {
-            var that = this;
-            var args = Array.prototype.slice.call(arguments);
-            var callback = args.pop();
-            return eachfn(fns, function (fn, cb) {
-                fn.apply(that, args.concat([cb]));
-            },
-            callback);
-        };
-        if (arguments.length > 2) {
-            var args = Array.prototype.slice.call(arguments, 2);
-            return go.apply(this, args);
-        }
-        else {
-            return go;
-        }
-    };
-    async.applyEach = doParallel(_applyEach);
-    async.applyEachSeries = doSeries(_applyEach);
-
-    async.forever = function (fn, callback) {
-        function next(err) {
-            if (err) {
-                if (callback) {
-                    return callback(err);
-                }
-                throw err;
-            }
-            fn(next);
-        }
-        next();
-    };
-
-    // Node.js
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = async;
-    }
-    // AMD / RequireJS
-    else if (typeof define !== 'undefined' && define.amd) {
-        define([], function () {
-            return async;
-        });
-    }
-    // included directly via <script> tag
-    else {
-        root.async = async;
-    }
-
-}());
-
-}).call(this,require('_process'))
-},{"_process":204}],255:[function(require,module,exports){
+},{}],258:[function(require,module,exports){
 (function (process,Buffer){
 ;(function (clarinet) {
   // non node-js needs to set clarinet debug on root
@@ -26569,7 +26709,7 @@ else env = window;
 })(typeof exports === "undefined" ? clarinet = {} : exports);
 
 }).call(this,require('_process'),require("buffer").Buffer)
-},{"_process":204,"buffer":4,"stream":222}],256:[function(require,module,exports){
+},{"_process":223,"buffer":23,"stream":241}],259:[function(require,module,exports){
 /*
 
 The MIT License (MIT)
@@ -26757,7 +26897,7 @@ for (var map in colors.maps) {
 }
 
 defineProps(colors, init());
-},{"./custom/trap":257,"./custom/zalgo":258,"./maps/america":259,"./maps/rainbow":260,"./maps/random":261,"./maps/zebra":262,"./styles":263,"./system/supports-colors":264}],257:[function(require,module,exports){
+},{"./custom/trap":260,"./custom/zalgo":261,"./maps/america":262,"./maps/rainbow":263,"./maps/random":264,"./maps/zebra":265,"./styles":266,"./system/supports-colors":267}],260:[function(require,module,exports){
 module['exports'] = function runTheTrap (text, options) {
   var result = "";
   text = text || "Run the trap, drop the bass";
@@ -26804,7 +26944,7 @@ module['exports'] = function runTheTrap (text, options) {
 
 }
 
-},{}],258:[function(require,module,exports){
+},{}],261:[function(require,module,exports){
 // please no
 module['exports'] = function zalgo(text, options) {
   text = text || "   he is here   ";
@@ -26910,7 +27050,7 @@ module['exports'] = function zalgo(text, options) {
   return heComes(text, options);
 }
 
-},{}],259:[function(require,module,exports){
+},{}],262:[function(require,module,exports){
 var colors = require('../colors');
 
 module['exports'] = (function() {
@@ -26923,7 +27063,7 @@ module['exports'] = (function() {
     }
   }
 })();
-},{"../colors":256}],260:[function(require,module,exports){
+},{"../colors":259}],263:[function(require,module,exports){
 var colors = require('../colors');
 
 module['exports'] = (function () {
@@ -26938,7 +27078,7 @@ module['exports'] = (function () {
 })();
 
 
-},{"../colors":256}],261:[function(require,module,exports){
+},{"../colors":259}],264:[function(require,module,exports){
 var colors = require('../colors');
 
 module['exports'] = (function () {
@@ -26947,13 +27087,13 @@ module['exports'] = (function () {
     return letter === " " ? letter : colors[available[Math.round(Math.random() * (available.length - 1))]](letter);
   };
 })();
-},{"../colors":256}],262:[function(require,module,exports){
+},{"../colors":259}],265:[function(require,module,exports){
 var colors = require('../colors');
 
 module['exports'] = function (letter, i, exploded) {
   return i % 2 === 0 ? letter : colors.inverse(letter);
 };
-},{"../colors":256}],263:[function(require,module,exports){
+},{"../colors":259}],266:[function(require,module,exports){
 /*
 The MIT License (MIT)
 
@@ -27031,7 +27171,7 @@ Object.keys(codes).forEach(function (key) {
   style.open = '\u001b[' + val[0] + 'm';
   style.close = '\u001b[' + val[1] + 'm';
 });
-},{}],264:[function(require,module,exports){
+},{}],267:[function(require,module,exports){
 (function (process){
 /*
 The MIT License (MIT)
@@ -27095,7 +27235,7 @@ module.exports = (function () {
   return false;
 })();
 }).call(this,require('_process'))
-},{"_process":204}],265:[function(require,module,exports){
+},{"_process":223}],268:[function(require,module,exports){
 //
 // Remark: Requiring this file will use the "safe" colors API which will not touch String.prototype
 //
@@ -27105,7 +27245,7 @@ module.exports = (function () {
 //
 var colors = require('./lib/colors');
 module['exports'] = colors;
-},{"./lib/colors":256}],266:[function(require,module,exports){
+},{"./lib/colors":259}],269:[function(require,module,exports){
 var hat = module.exports = function (bits, base) {
     if (!base) base = 16;
     if (bits === undefined) bits = 128;
@@ -27169,7 +27309,7 @@ hat.rack = function (bits, base, expandBy) {
     return fn;
 };
 
-},{}],267:[function(require,module,exports){
+},{}],270:[function(require,module,exports){
 (function (global){
 /**
  * @license
@@ -39524,7 +39664,7 @@ hat.rack = function (bits, base, expandBy) {
 }.call(this));
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],268:[function(require,module,exports){
+},{}],271:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.2.0
  * @author yeikos
@@ -39700,7 +39840,7 @@ hat.rack = function (bits, base, expandBy) {
 	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],269:[function(require,module,exports){
+},{}],272:[function(require,module,exports){
 /**
  * Helpers.
  */
@@ -39827,7 +39967,7 @@ function plural(ms, n, name) {
   return Math.ceil(ms / n) + ' ' + name + 's';
 }
 
-},{}],270:[function(require,module,exports){
+},{}],273:[function(require,module,exports){
 (function (Buffer){
 /* global Blob */
 
@@ -40355,8 +40495,8 @@ Peer.prototype._debug = function () {
 
 function noop () {}
 
-}).call(this,{"isBuffer":require("../../../../.nvm/versions/node/v0.12.7/lib/node_modules/browserify/node_modules/insert-module-globals/node_modules/is-buffer/index.js")})
-},{"../../../../.nvm/versions/node/v0.12.7/lib/node_modules/browserify/node_modules/insert-module-globals/node_modules/is-buffer/index.js":202,"debug":271,"get-browser-rtc":273,"hat":266,"inherits":274,"is-typedarray":275,"once":277,"stream":222,"typedarray-to-buffer":278}],271:[function(require,module,exports){
+}).call(this,{"isBuffer":require("../browserify/node_modules/insert-module-globals/node_modules/is-buffer/index.js")})
+},{"../browserify/node_modules/insert-module-globals/node_modules/is-buffer/index.js":221,"debug":274,"get-browser-rtc":276,"hat":269,"inherits":277,"is-typedarray":278,"once":280,"stream":241,"typedarray-to-buffer":281}],274:[function(require,module,exports){
 
 /**
  * This is the web browser implementation of `debug()`.
@@ -40526,7 +40666,7 @@ function localstorage(){
   } catch (e) {}
 }
 
-},{"./debug":272}],272:[function(require,module,exports){
+},{"./debug":275}],275:[function(require,module,exports){
 
 /**
  * This is the common logic for both the Node.js and web browser
@@ -40725,7 +40865,7 @@ function coerce(val) {
   return val;
 }
 
-},{"ms":269}],273:[function(require,module,exports){
+},{"ms":272}],276:[function(require,module,exports){
 // originally pulled out of simple-peer
 
 module.exports = function getBrowserRTC () {
@@ -40742,9 +40882,9 @@ module.exports = function getBrowserRTC () {
   return wrtc
 }
 
-},{}],274:[function(require,module,exports){
-arguments[4][201][0].apply(exports,arguments)
-},{"dup":201}],275:[function(require,module,exports){
+},{}],277:[function(require,module,exports){
+arguments[4][220][0].apply(exports,arguments)
+},{"dup":220}],278:[function(require,module,exports){
 module.exports      = isTypedArray
 isTypedArray.strict = isStrictTypedArray
 isTypedArray.loose  = isLooseTypedArray
@@ -40787,7 +40927,7 @@ function isLooseTypedArray(arr) {
   return names[toString.call(arr)]
 }
 
-},{}],276:[function(require,module,exports){
+},{}],279:[function(require,module,exports){
 // Returns a wrapper function that returns a wrapped callback
 // The wrapper function should do some stuff, and return a
 // presumably different callback function.
@@ -40822,7 +40962,7 @@ function wrappy (fn, cb) {
   }
 }
 
-},{}],277:[function(require,module,exports){
+},{}],280:[function(require,module,exports){
 var wrappy = require('wrappy')
 module.exports = wrappy(once)
 
@@ -40845,7 +40985,7 @@ function once (fn) {
   return f
 }
 
-},{"wrappy":276}],278:[function(require,module,exports){
+},{"wrappy":279}],281:[function(require,module,exports){
 (function (Buffer){
 /**
  * Convert a typed array to a Buffer without a copy
@@ -40880,5 +41020,5 @@ module.exports = function (arr) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"is-typedarray":275}]},{},[236])(236)
+},{"buffer":23,"is-typedarray":278}]},{},[1])(1)
 });
