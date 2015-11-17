@@ -1,8 +1,8 @@
 'use strict';
 
-module.exports = {
-  ByrdServerTransport: require('./lib/transport'),
-  ByrdServerContact: require('./lib/contact'),
-  Router: require('./lib/router'),
-  Shredder: require('./lib/shredder')
-};
+module.exports = require('./lib/engine');
+module.exports.ServerTransport = require('./lib/server-transport');
+module.exports.ClientTransport = require('./lib/client-transport');
+module.exports.Contact = require('./lib/contact');
+module.exports.Router = require('./lib/router');
+module.exports.Shredder = require('./lib/shredder');

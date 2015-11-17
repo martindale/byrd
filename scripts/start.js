@@ -1,15 +1,12 @@
 'use strict';
 
 var config = require('config');
-var kademlia = require('kad');
-var ByrdServerTransport = require('../lib/transport');
 var levelup = require('levelup');
 var express = require('express');
 var http = require('http');
 
-config.validate = function(key, value, done) {
-  done(true); // TODO: add validation for content addressability
-};
+var ByrdEngine = require('../lib/engine');
+var ByrdServerTransport = require('../lib/server-transport');
 
 config.transport = ByrdServerTransport;
 config.storage = levelup(config.datadir);
@@ -21,4 +18,4 @@ if (config.get('protocol') === 'https' && config.get('port') === 443) {
   })).listen(80);
 }
 
-module.exports = kademlia(config, function(err) {});
+module.exports = ByrdEngine(config);

@@ -3,22 +3,7 @@ html(lang='en-us')
   head
     meta(charset='utf-8')
     title BYRD ~ Bring Your Restricted Documents
-    script window.byrd = {};
-    script(src='vendor/async/dist/async.js')
-    script(src='vendor/aes/aes.js')
-    script(src='vendor/aes/aes-ctr.js')
-    script(src='vendor/bitcore-lib/bitcore-lib.min.js')
-    script(src='lib/shims.js')
-    script(src='lib/kad.browser.js')
-    script(src='lib/kad-localstorage.min.js')
-    script(src='lib/statusline.js')
-    script(src='lib/shredder.js')
-    script(src='lib/blueprint.js')
-    script(src='lib/contact.js')
-    script(src='lib/transport.js')
-    script(src='lib/dht.js')
-    script(src='lib/chomper.js')
-    script(src='lib/app.js')
+    script(src='client.js')
     link(rel='stylesheet', href='styles/main.css')
     link(href='https://fonts.googleapis.com/css?family=Open+Sans:400,300italic,400italic,600,600italic,700,300' rel='stylesheet' type='text/css')
     meta(name='viewport' content='width=device-width')
@@ -27,8 +12,8 @@ body
     .wrapper
       i#indicator.idle
       span.status No activity
-      #peers
-        span.number 0
+      //- #peers
+        //- span.number 0
   #header
     h1#logo BYRD
   #main.wrapper
@@ -53,7 +38,7 @@ body
         h3 Distribute
         form#shred-form
           #distribute-name-fields(style='display:none')
-            input#blueprint-name(type='text', placeholder='Type an alias to make your content addressable...')
+            //- input#blueprint-name(type='text', placeholder='Type an alias to make your content addressable...')
             aside
               button#distribute(type='submit') Distribute
               button#goto-dropzone Go Back

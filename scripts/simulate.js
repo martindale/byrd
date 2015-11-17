@@ -2,12 +2,12 @@
 
 var assert = require('assert');
 var config = require('config');
-var kademlia = require('kad');
+var BYRDEngine = require('../lib/engine');
 var memdown = require('memdown');
-var BYRDTransport = require('../lib/transport');
+var BYRDTransport = require('../lib/server-transport');
 var levelup = require('levelup');
 
-var byrd1 = kademlia(fakeConfig({
+var byrd1 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3050,
@@ -17,7 +17,7 @@ var byrd1 = kademlia(fakeConfig({
   logLevel: 4
 }));
 
-var byrd2 = kademlia(fakeConfig({
+var byrd2 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3051,
@@ -33,7 +33,7 @@ var byrd2 = kademlia(fakeConfig({
   logLevel: 4
 }));
 
-var byrd3 = kademlia(fakeConfig({
+var byrd3 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3052,
@@ -54,7 +54,7 @@ var byrd3 = kademlia(fakeConfig({
   logLevel: 4
 }));
 
-var byrd4 = kademlia(fakeConfig({
+var byrd4 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3053,
@@ -75,7 +75,7 @@ var byrd4 = kademlia(fakeConfig({
   logLevel: 4
 }));
 
-var byrd5 = kademlia(fakeConfig({
+var byrd5 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3054,
@@ -96,7 +96,7 @@ var byrd5 = kademlia(fakeConfig({
   logLevel: 4
 }));
 
-var byrd6 = kademlia(fakeConfig({
+var byrd6 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3055,
