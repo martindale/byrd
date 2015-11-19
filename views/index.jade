@@ -34,9 +34,9 @@ body
           later retrieved and reassembled on your computer by using an easy to remember "alias".
       p
         a(href='https://gitlab.com/counterpoint/byrd/blob/master/README.md') Learn More →
+  #dropzone(v-on:click='openFileDialog', v-on:drop='queueFileDistribution')
+    input#file(type='file', v-on:change='queueFileDistribution')
+    img(src='/img/dropzone.svg')
+    p.desktop Distribute a file by dragging it here.
+    p.mobile Tap to distribute a file.
   #files
-    #dropzone(v-on:click='openFileDialog', v-on:drop='queueFileDistribution')
-      input#file(type='file', v-on:change='queueFileDistribution')
-      img(src='/img/dropzone.svg')
-      p.desktop Distribute a file by dragging it here.
-      p.mobile Tap to distribute a file.
