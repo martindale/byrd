@@ -8,12 +8,17 @@ html(lang='en-us')
     link(href='https://fonts.googleapis.com/css?family=Open+Sans:400,300italic,400italic,600,600italic,700,300' rel='stylesheet' type='text/css')
     meta(name='viewport' content='width=device-width')
 body
-  header#header
-    h1#logo BYRD
-    form#lookup(v-on:submit='resolve')
-      input(type='text', placeholder='Paste a file alias here...', value='{{hash}}')
-      input(type='submit', value='Find')
-    button#more(v-on:click='showmore') About
+  #header
+    table
+      tr
+        td.logo.desktop
+          h1#logo BYRD
+        td
+          form#lookup(v-on:submit='resolve')
+            input(type='text', placeholder='Paste a file alias here...', value='{{hash}}')
+            input(type='submit', value='Find')
+        td.menu
+          button#more(v-on:click='showmore') About
     #menu(class='{{menuVisibility}}')
       button#less(v-on:click='showless') Close
       h3 About
@@ -29,3 +34,9 @@ body
           later retrieved and reassembled on your computer by using an easy to remember "alias".
       p
         a(href='https://gitlab.com/counterpoint/byrd/blob/master/README.md') Learn More →
+  #files
+    #dropzone(v-on:click='openFileDialog', v-on:drop='queueFileDistribution')
+      input#file(type='file', v-on:change='queueFileDistribution')
+      img(src='/img/dropzone.svg')
+      p.desktop Distribute a file by dragging it here.
+      p.mobile Tap to distribute a file.
