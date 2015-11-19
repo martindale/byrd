@@ -147,6 +147,20 @@ html, body {
   animation-duration: 0.25s;
 }
 
+.peers {
+  list-style-type: none;
+  padding: 0 12px;
+  margin: 0;
+  font-family: monospace;
+  background: #fff;
+  border-radius: 2px;
+  border: 1px solid #e2e2e2;
+}
+
+.peers li {
+  margin: 12px 0;
+}
+
 #dropzone {
   background-color: #333;
   overflow: hidden;
