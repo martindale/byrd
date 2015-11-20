@@ -15,7 +15,7 @@ body
           h1#logo BYRD
         td
           form#lookup(v-on:submit='resolve')
-            input(type='text', placeholder='Paste a file alias here...', v-model='key')
+            input(type='text', placeholder='Paste a file key here...', v-model='key')
             input(type='submit', value='Find')
         td.menu
           button#more(v-on:click='showmore') About
@@ -31,7 +31,7 @@ body
         a(href='https://en.wikipedia.org/wiki/Plausible_deniability') plausible deniability
         span.
           . Files are encrypted, shredded, and disbursed all over the network. The chunks can be
-          later retrieved and reassembled on your computer by using an easy to remember "alias".
+          later retrieved and reassembled on your computer by using a unique key.
       p
         a(href='https://gitlab.com/counterpoint/byrd/blob/master/README.md') Learn More →
       h3 Connected Peers ({{peers.length}})
