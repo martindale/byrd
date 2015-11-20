@@ -183,6 +183,7 @@ p.copyleft {
   background: #fff;
   border-radius: 2px;
   border: 1px solid #e2e2e2;
+  overflow: auto;
 }
 
 .peers li {
