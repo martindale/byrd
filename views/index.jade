@@ -52,3 +52,11 @@ body
           aside.status {{file.status.message}}
           button.upload(v-show='!file.working', v-on:click='distribute(file)') Distribute
   #files
+    ul
+      template(v-for='file in files')
+        li
+          h4
+            strong {{file.filename}}
+            em ({{file.size}} bytes)
+          button.save(v-on:click='save(file)') Save
+          button.save.key(v-on:click='showkey(file)') Show Key

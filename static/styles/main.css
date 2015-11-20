@@ -214,16 +214,23 @@ p {
   display: none;
 }
 
-#queue ul {
+#queue ul,
+#files ul {
   margin: 0;
   padding: 0;
   list-style-type: none;
 }
 
-#queue ul li {
+#queue ul li,
+#files ul li {
   padding: 24px;
   border-bottom: 1px solid #d2d2d2;
   overflow: hidden;
+}
+
+#queue ul li.error h4,
+#queue ul li.error aside {
+  color: red;
 }
 
 #queue ul li.working {
@@ -244,18 +251,25 @@ p {
   }
 }
 
-#queue ul li h4 {
+#queue ul li h4,
+#files ul li h4 {
   margin: 0 0 12px 0;
   color: #55487e;
   font-size: 14px;
   overflow: hidden;
 }
 
-#queue ul li h4 strong {
+#files ul li h4 {
+  color: #719a48;
+}
+
+#queue ul li h4 strong,
+#files ul li h4 strong {
   float: left;
 }
 
-#queue ul li h4 em {
+#queue ul li h4 em,
+#files ul li h4 em {
   font-weight: normal;
   font-style: normal;
   font-family: monospace;
@@ -269,7 +283,18 @@ p {
   padding: 4px 0;
 }
 
-#queue .upload {
+#files aside.hash {
+  font-size: 12px;
+  font-family: monospace;
+  background: #fff;
+  border: 1px solid #e2e2e2;
+  border-radius: 2px;
+  padding: 5px;
+  word-wrap: break-word;
+}
+
+#queue .upload,
+#files .save {
   float: right;
   background: #719a48;
   color: #fff;
@@ -280,7 +305,18 @@ p {
   text-transform: uppercase;
 }
 
-#queue .upload:hover {
+#files .save {
+  margin-top: 12px;
+  margin-left: 12px;
+}
+
+#files .save.key {
+  background: #d2d2d2;
+  color: #666;
+}
+
+#queue .upload:hover,
+#files .save:hover {
   opacity: 0.8;
   cursor: pointer;
 }
