@@ -37,9 +37,18 @@ body
       h3 Connected Peers ({{peers.length}})
       ul.peers
         li(v-for='peer in peers') {{peer}}
-  #dropzone(v-on:click='openFileDialog', v-on:drop='queueFileDistribution')
-    input#file(type='file', v-on:change='queueFileDistribution')
+  #dropzone(v-on:click='openFileDialog', v-on:drop='queueFile')
+    input#file(type='file', v-on:change='queueFile')
     img(src='/img/dropzone.svg')
     p.desktop Distribute a file by dragging it here.
     p.mobile Tap to distribute a file.
+  #queue
+    ul
+      template(v-for='file in queued')
+        li(class='{{file.status.type}}', v-bind:class='{"working":file.working}')
+          h4
+            strong {{file.filename}}
+            em ({{file.size}} bytes)
+          aside.status {{file.status.message}}
+          button.upload(v-show='!file.working', v-on:click='distribute(file)') Distribute
   #files

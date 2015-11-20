@@ -2,15 +2,33 @@ html, body {
   font-family: 'Open Sans', sans-serif;
   margin: 0;
   padding: 0;
-  background-color: #fff;
+  background-color: #f6f6f6;
   color: #333;
   overflow: hidden;
+}
+
+h3 {
+  color: #55487e;
+  clear: both;
+}
+
+a {
+  color: #719a48;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+p {
+  font-size: 14px;
 }
 
 #header h1 {
   height: 60px;
   margin: 0 24px 0 12px;
-  background: url('/img/byrd_logo_icon.png') center center no-repeat;
+  background: url('/img/byrd_onecolor.svg') center center no-repeat;
   text-indent: -9999px;
   width: 60px;
   background-size: 90%;
@@ -114,7 +132,7 @@ html, body {
 }
 
 #menu {
-  position: absolute;
+  position: fixed;
   top: 0;
   right: -320px;
   bottom: 0;
@@ -123,6 +141,7 @@ html, body {
   box-shadow: 0 0 5px #666;
   padding: 24px;
   border-top: 4px solid #719a48;
+  overflow: auto;
 }
 
 @keyframes showmore {
@@ -195,48 +214,76 @@ html, body {
   display: none;
 }
 
-#indicator {
-  float: left;
-  margin: 12px;
-  width: 24px;
-  height: 24px;
-  border-radius: 12px;
+#queue ul {
+  margin: 0;
+  padding: 0;
+  list-style-type: none;
 }
 
-#indicator.idle {
-  background-color: #d2d2d2;
+#queue ul li {
+  padding: 24px;
+  border-bottom: 1px solid #d2d2d2;
+  overflow: hidden;
 }
 
-#indicator.working {
-  background-color: blue;
+#queue ul li.working {
+  background: url('/img/loading.png') 0 0 repeat;
+  animation: loading 8s linear infinite;
 }
 
-#indicator.failed {
-  background-color: red;
+#queue li.working .upload {
+  display: none;
 }
 
-#indicator.success {
-  background-color: green;
+@keyframes loading {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 100% 0;
+  }
 }
 
-h3 {
+#queue ul li h4 {
+  margin: 0 0 12px 0;
   color: #55487e;
-  clear: both;
-}
-
-a {
-  color: #719a48;
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
-}
-
-p {
   font-size: 14px;
+  overflow: hidden;
 }
 
+#queue ul li h4 strong {
+  float: left;
+}
+
+#queue ul li h4 em {
+  font-weight: normal;
+  font-style: normal;
+  font-family: monospace;
+  float: right;
+}
+
+#queue aside.status {
+  color: #666;
+  font-size: 12px;
+  float: left;
+  padding: 4px 0;
+}
+
+#queue .upload {
+  float: right;
+  background: #719a48;
+  color: #fff;
+  font-size: 12px;
+  border: none;
+  border-radius: 2px;
+  padding: 6px 12px;
+  text-transform: uppercase;
+}
+
+#queue .upload:hover {
+  opacity: 0.8;
+  cursor: pointer;
+}
 
 @media (max-width: 858px) {
 
