@@ -52,6 +52,7 @@ body
           aside.status {{file.status.message}}
           button.upload(v-show='!file.working', v-on:click='distribute(file)') Distribute
   #files
+    p.empty(v-if='!files.length') There are no files to show yet.
     ul
       template(v-for='file in files')
         li
