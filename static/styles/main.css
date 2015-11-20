@@ -293,6 +293,10 @@ p {
   word-wrap: break-word;
 }
 
+.error .upload {
+  display: none;
+}
+
 #queue .upload,
 #files .save {
   float: right;

@@ -15,7 +15,7 @@ body
           h1#logo BYRD
         td
           form#lookup(v-on:submit='resolve')
-            input(type='text', placeholder='Paste a file alias here...', value='{{hash}}')
+            input(type='text', placeholder='Paste a file alias here...', v-model='key')
             input(type='submit', value='Find')
         td.menu
           button#more(v-on:click='showmore') About
