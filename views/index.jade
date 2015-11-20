@@ -37,6 +37,9 @@ body
       h3 Connected Peers ({{peers.length}})
       ul.peers
         li(v-for='peer in peers') {{peer}}
+      p.copyleft
+        span N&copy;! 2015 Counterpoint Hackers&nbsp;
+        a(href='https://gitlab.com/counterpoint/byrd') [source]
   #dropzone(v-on:click='openFileDialog', v-on:drop='queueFile')
     input#file(type='file', v-on:change='queueFile')
     img(src='/img/dropzone.svg')

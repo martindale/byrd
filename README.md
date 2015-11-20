@@ -67,3 +67,47 @@ following format. This will override the default options.
   "datadir": "/path/to/desired/byrd.db"
 }
 ```
+
+## Module
+
+Byrd is also packaged as a library, so you can use it within your own
+application.
+
+```js
+var byrd = require('byrd')(config);
+
+// distribute a file
+var filename = 'myfile.txt';
+var buffer = fs.readFileSync(filename);
+
+byrd.distribute(filename, buffer, function(err, filekey) {
+  console.log(err || 'Success! File lookup key is: ' + filekey);
+});
+
+// resolve a file
+var filekey = 'sha256hash...';
+
+byrd.resolve(filekey, function(err, file) {
+  console.log(err || file.getContents());
+});
+```
+
+This module is compatible with browserify and can be used in the browser!
+
+## License
+
+BYRD ~ Bring Your Restricted Documents
+N©! 2015  Counterpoint Hackers
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
