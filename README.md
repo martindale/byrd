@@ -53,7 +53,6 @@ following format. This will override the default options.
 
 ```
 {
-  "ssl": false,
   "ca": [],
   "cert": null,
   "key": null,
@@ -93,6 +92,65 @@ byrd.resolve(filekey, function(err, file) {
 ```
 
 This module is compatible with browserify and can be used in the browser!
+
+## Protocol
+
+Byrd is little more than an interface and set of validation rules that sits on
+top of [Kad](https://gitlab.com/gordonhall/kad) (a distributed hash table). In
+this regard, the BYRD-specific protocol can be summed up as:
+
+```
+key === hex ( sha256( filechunk ) ) &&  bytelength( filechunk ) <= 32000
+```
+
+This means that as far as storage nodes are concerned, the only rules are that
+values must be less than 32kb and addressable by their hash. The distribution
+and resolution magic all happens locally.
+
+### Metadata Discovery
+
+BYRD is designed so that any file can be fetched from the network by a unique
+key. This is done by storing metadata file called "eggs" to aid peers in
+discovering the location of the individual file chunks and later reassembling
+them. In fact, the unique key for a file is actually the SHA-265 hash of the
+smallest egg file describing it.
+
+An egg file is a HEX-encoded JSON string with the following properties:
+
+```
+{
+  "filename": "somefile.pdf",
+  "hash": "<sha256_hash_target_file>",
+  "chunks": [
+    "<sha256_hash_of_chunk_0>",
+    "<sha256_hash_of_chunk_1>",
+    "<sha256_hash_of_chunk_N>"
+  ]
+}
+```
+
+The client fetches the chunk located at the given key. If that chunk is an egg,
+then the client then fetches each chunk in the egg, concatenates them in order,
+then decrypts the entire file (AES) using the hash included in the egg. If the
+result is another egg file (likely the case for larger files), then the client
+recursively discovers for metadata this way until the complete file is resolved.
+
+It's eggs all the way down!
+
+### Content Distribution
+
+The inverse of the aforementioned flow is true for distributing a file. First,
+the client loads the selected file into memory and encrypts it with the SHA-256
+hash of the original file. Then, the encrypted file is sliced into 32kb chunks
+(or a minimum of 10 chunks - whichever yields more chunks). Finally, the client
+creates an egg file containing the metadata described above.
+
+If the resulting egg file is less than 32kb, then it is stored by it's SHA-256
+hash and that key is returned and may be used to later resolve the original
+file. Contrarily, if the resulting egg file is greater than 32kb, then it the
+client recursively distributes it in the same manner described above for the
+original file until the resulting egg file is small enough to store at a single
+key.
 
 ## License
 
