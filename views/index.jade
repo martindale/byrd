@@ -62,5 +62,6 @@ body
           h4
             strong {{file.filename}}
             em ({{file.size}} bytes)
-          a.save(href='{{file.uri}}', download='{{file.filename}}') Save
+          a.save(v-if='file.uri', href='{{file.uri}}', download='{{file.filename}}') Save
+          button.save.key(v-if='!file.uri') ...
           button.save.key(v-on:click='showkey(file)') Show Key
