@@ -4,12 +4,12 @@ html, body {
   padding: 0;
   background-color: #f6f6f6;
   color: #333;
-  overflow: hidden;
 }
 
 h3 {
   color: #55487e;
   clear: both;
+  margin-top: 4px;
 }
 
 a {
@@ -120,7 +120,9 @@ p {
   background-size: 100%;
   text-indent: -9999px;
   opacity: 0.4;
-  float: right;
+  position: absolute;
+  right: 24px;
+  top: 24px;
 }
 
 #less:hover, #more:hover {
@@ -175,6 +177,27 @@ p.copyleft {
   animation-duration: 0.25s;
 }
 
+#panic {
+  width: 100%;
+  padding: 8px;
+  color: #fff;
+  margin: 6px 0px;
+  background: #ee0000;
+  text-transform: uppercase;
+  border: 1px solid red;
+  border-radius: 2px;
+}
+
+#panic:hover, #panic:active {
+  opacity: 0.8;
+  cursor: pointer;
+}
+
+#logo {
+  text-align: center;
+  margin: 24px 0;
+}
+
 .peers {
   list-style-type: none;
   padding: 0 12px;
@@ -184,6 +207,7 @@ p.copyleft {
   border-radius: 2px;
   border: 1px solid #e2e2e2;
   overflow: auto;
+  height: 218px;
 }
 
 .peers li {
@@ -297,16 +321,7 @@ p.copyleft {
   font-size: 12px;
   float: left;
   padding: 4px 0;
-}
-
-#files aside.hash {
-  font-size: 12px;
-  font-family: monospace;
-  background: #fff;
-  border: 1px solid #e2e2e2;
-  border-radius: 2px;
-  padding: 5px;
-  word-wrap: break-word;
+  word-break: break-all;
 }
 
 .error .upload {

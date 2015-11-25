@@ -21,7 +21,12 @@ body
           button#more(v-on:click='showmore') About
     #menu(class='{{menuVisibility}}')
       button#less(v-on:click='showless') Close
-      img(src='img/byrd_logo_logo.png', width='100%')
+      h3 Connected Peers ({{peers.length}})
+      ul.peers
+        li(v-for='peer in peers') {{peer}}
+      button#panic(v-on:click='panic') Panic
+      #logo
+        img(src='img/byrd_logo_logo.png')
       p
         span The game is simple. You've got access to documents and&nbsp;
         strong we want you to leak them
@@ -34,9 +39,7 @@ body
           later retrieved and reassembled on your computer by using a unique key.
       p
         a(href='https://gitlab.com/counterpoint/byrd/blob/master/README.md') Learn More →
-      h3 Connected Peers ({{peers.length}})
-      ul.peers
-        li(v-for='peer in peers') {{peer}}
+
       p.copyleft
         span N&copy;! 2015 Counterpoint Hackers&nbsp;
         a(href='https://gitlab.com/counterpoint/byrd') [source]
