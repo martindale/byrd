@@ -3,15 +3,19 @@
 var assert = require('assert');
 var config = require('config');
 var BYRDEngine = require('../lib/engine');
-var memdown = require('memdown');
 var BYRDTransport = require('../lib/server-transport');
-var levelup = require('levelup');
+var kadfs = require('kad-fs');
+var os = require('os');
+
+var storage = function(name) {
+  return kadfs(os.tmpdir() + '/byrd.simulation.node.' + name + '.db');
+};
 
 var byrd1 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3050,
-  storage: levelup({ db: memdown }),
+  storage: storage('1'),
   transport: BYRDTransport,
   seeds: [],
   logLevel: 4
@@ -21,7 +25,7 @@ var byrd2 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3051,
-  storage: levelup({ db: memdown }),
+  storage: storage('2'),
   transport: BYRDTransport,
   seeds: [
     {
@@ -37,7 +41,7 @@ var byrd3 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3052,
-  storage: levelup({ db: memdown }),
+  storage: storage('3'),
   transport: BYRDTransport,
   seeds: [
     {
@@ -58,7 +62,7 @@ var byrd4 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3053,
-  storage: levelup({ db: memdown }),
+  storage: storage('4'),
   transport: BYRDTransport,
   seeds: [
     {
@@ -79,7 +83,7 @@ var byrd5 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3054,
-  storage: levelup({ db: memdown }),
+  storage: storage('5'),
   transport: BYRDTransport,
   seeds: [
     {
@@ -100,7 +104,7 @@ var byrd6 = BYRDEngine(fakeConfig({
   protocol: 'http',
   address: '127.0.0.1',
   port: 3055,
-  storage: levelup({ db: memdown }),
+  storage: storage('6'),
   transport: BYRDTransport,
   seeds: [
     {
